@@ -15,10 +15,10 @@
 
 <br/>
 
-**Sanket Patil** — Final Year B.Tech CSE @ D.Y. Patil College of Engineering & Technology, Kolhapur  
+**Sanket Talekar** — Final Year B.Tech CSE @ D.Y. Patil College of Engineering & Technology, Kolhapur  
 AI Automation Engineer & Full Stack Developer (AI Focus)
 
-[LinkedIn](#) · [Portfolio](#) · [NyayaSathi — Production RAG Project](#)
+[LinkedIn](https://www.linkedin.com/in/sanket-talekar-94087a263/) · [Portfolio](https://sanketprogrammer.netlify.app/) 
 
 </div>
 
