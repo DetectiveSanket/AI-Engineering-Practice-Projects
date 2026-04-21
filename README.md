@@ -371,12 +371,18 @@ LLMs · Prompt Engineering · Fine-tuning · RAG · Context Engineering · AI Ag
 
 If you're a recruiter, hiring manager, or fellow builder — feel free to reach out.
 
-**Sanket Patil**  
+**Sanket Talekar**  
 B.Tech CSE · D.Y. Patil College of Engineering & Technology, Kolhapur  
-Graduating: June 2026 · CGPA: 8.32  
+Graduating: June 2026 · CGPA: 8.32
+Experience: Junior Software Developer at 'The Business Legacy' -- Pune , Maharashtra (Jan 2026 - Present) 
+</br>
 Targeting: AI Automation Engineer · Full Stack Developer (AI Focus)
 
-[LinkedIn](#) · [Email](#)
+· [LinkedIn](https://www.linkedin.com/in/sanket-patil-b2867128a/) 
+· [Email](sankettalekar896@gmail.com)
+· [Portfolio ](https://sanketprogrammer.netlify.app/)
+· [GitHub](https://github.com/DetectiveSanket)
+
 
 ---
 
