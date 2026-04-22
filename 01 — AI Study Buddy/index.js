@@ -1,26 +1,39 @@
-import { GoogleGenAI } from "@google/genai";
-import { config } from "dotenv";
-import { fileURLToPath } from "url";
-import { dirname, join } from "path";
 
-// Force dotenv to load from the exact folder this file is in
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
-config({ path: join(__dirname, ".env") });
+import {generateContent} from './src/geminiClient.js'
 
-// Immediately verify the key loaded — this will tell us exactly what's happening
-console.log("Key loaded:", process.env.GEMINI_API_KEY ? "YES ✓" : "NO ✗");
+async function run () {
 
-const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+    const prompt = 'Give me 5 tips for time management';
+    console.log("🚀 AI Study Buddy is waking up...");
 
-async function main() {
-  const response = await ai.models.generateContent({
-    model: "gemini-3-flash-preview",
-    contents: "Explain how AI works in a few words",
-  });
-  console.log(response.text);
+    try {
+        // Here we use the function you created!
+        // We pass the prompt, and we also pass a custom config object.
+        const response = await generateContent({
+            prompt: prompt,
+            // prompt: 'Give me 5 tips for time management',
+            config: {
+                temperature: 0.5,
+                maxTokens : 100
+            }
+        });
+
+        console.log("\n--- AI Explanation ---");
+        console.log(response);
+        console.log("----------------------");
+
+    }catch(error){
+        console.error('Error generating content: ', error.message);
+    }
 }
 
-main();
+run();
+
+
+//  we can give specific instructions to the AI model for a tailored response, use lower temperature (0.1-0.4) for deterministic and precise responses, use higher temperature (0.7-1.0) for creative and diverse responses, for factual accuracy and code generation, use lower temperature, for content creation, poetry, and creative writing, use higher temperature.
+
+// ./src/geminiClient.js 
+
+
 
 

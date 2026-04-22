@@ -1,10 +1,21 @@
-import { createClient } from "@google/genai";
-import "dotenv/config";
+
+import { GoogleGenAI } from "@google/genai";
+
+import { config } from "dotenv";
+import { fileURLToPath } from "url";
+import { dirname, join } from "path";
+
+// Force dotenv to load from the exact folder this file is in
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+config({ path: join(__dirname, "..", ".env") });
 
 // Initialize the client
 // The SDK can also read GOOGLE_API_KEY automatically if set, 
 // but we'll be explicit as per the user's request for "automatic from .env"
-const client = createClient({
+
+
+const client = new GoogleGenAI({
     apiKey: process.env.GEMINI_API_KEY
 });
 
@@ -15,7 +26,7 @@ const client = createClient({
  * @param {string} options.prompt - The prompt text
  * @param {Object} options.config - Generation config (temperature, etc.)
  */
-export async function generateContent({ model = 'gemini-1.5-flash', prompt, config = {} }) {
+export async function generateContent({ model = 'gemini-3-flash-preview', prompt, config = {} }) {
     try {
         if (!process.env.GEMINI_API_KEY) {
             throw new Error("GEMINI_API_KEY is missing in .env file");
@@ -31,7 +42,7 @@ export async function generateContent({ model = 'gemini-1.5-flash', prompt, conf
             }
         });
 
-        return response.text();
+        return response.text;
     } catch (error) {
         console.error("Gemini API Error:", error.message);
         throw error;
