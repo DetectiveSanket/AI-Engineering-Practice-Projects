@@ -1,0 +1,495 @@
+# AI Study Buddy — Code Reference Guide
+
+> **Purpose:** This file explains every line of code in this project — why it was written, what it does, and common mistakes a beginner might make. It will grow as the project grows.
+
+---
+
+## Table of Contents
+1. [Project Structure](#project-structure)
+2. [File: `src/geminiClient.js`](#file-srcgeminiclientjs)
+3. [File: `index.js`](#file-indexjs)
+4. [Bugs We Fixed (and Why)](#bugs-we-fixed-and-why)
+5. [Concepts Glossary](#concepts-glossary)
+
+---
+
+## Project Structure
+
+```
+01 — AI Study Buddy/
+├── .env                  ← Your secret API key lives here. NEVER commit this to Git.
+├── index.js              ← The entry point. This is the file you run with `node index.js`.
+├── package.json          ← Lists your project's name, dependencies, and scripts.
+├── src/
+│   └── geminiClient.js   ← The "Engine Room". All AI setup and communication logic lives here.
+└── docs/
+    └── code-explained.md ← This file!
+```
+
+**Why do we separate files?**
+Instead of putting all the code in one huge file, we split it by responsibility:
+- `geminiClient.js` handles **"How do I talk to Google's AI?"**
+- `index.js` handles **"What do I want to say to the AI?"**
+
+This is called **Separation of Concerns** — a core principle of professional software development.
+
+---
+
+## File: `src/geminiClient.js`
+
+This is the **Engine Room** of your project. It handles all the boring but critical setup:
+authenticating with Google, loading your secret key, and providing a clean function that
+any other file can call to get an AI response.
+
+### The Complete File (Current State)
+
+```javascript
+import { GoogleGenAI } from "@google/genai";
+import { config } from "dotenv";
+import { fileURLToPath } from "url";
+import { dirname, join } from "path";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+config({ path: join(__dirname, "..", ".env") });
+
+const client = new GoogleGenAI({
+    apiKey: process.env.GEMINI_API_KEY
+});
+
+export async function generateContent({ model = 'gemini-3-flash-preview', prompt, config = {} }) {
+    try {
+        if (!process.env.GEMINI_API_KEY) {
+            throw new Error("GEMINI_API_KEY is missing in .env file");
+        }
+
+        const response = await client.models.generateContent({
+            model: model,
+            contents: prompt,
+            generationConfig: {
+                temperature: config.temperature ?? 0.7,
+                topP: config.topP ?? 0.95,
+                maxOutputTokens: config.maxTokens ?? 2048,
+            }
+        });
+
+        return response.text;
+    } catch (error) {
+        console.error("Gemini API Error:", error.message);
+        throw error;
+    }
+}
+
+export default client;
+```
+
+---
+
+### Line-by-Line Breakdown
+
+---
+
+#### `import { GoogleGenAI } from "@google/genai";`
+
+**What it does:** Pulls the `GoogleGenAI` class from a library called `@google/genai`
+that you installed with `npm install @google/genai`.
+
+**Why we use it:** This is the "Phone" to call Google's AI servers. Without it, Node.js
+has no idea how to speak to the Gemini API.
+
+**Why `GoogleGenAI` and not `createClient`?**
+Both come from the same `@google/genai` library, but:
+- `createClient` is a newer factory function — NOT available in all versions.
+- `GoogleGenAI` is the stable Class that works reliably across versions.
+- We tried `createClient` first and got: `SyntaxError: does not provide an export named 'createClient'`.
+- **Lesson:** Always check your library's version before copying code from the internet.
+
+**Beginner Mistake:** Writing `import GoogleGenAI from "@google/genai"` (without curly braces `{}`).
+Curly braces mean you are pulling out a **named export**. Without them, you get the **default export**,
+which is something else entirely, and your code silently breaks.
+
+---
+
+#### `import { config } from "dotenv";`
+
+**What it does:** Imports the `config` function from the `dotenv` library.
+
+**Why we use it:** Your API key is a secret — you should NEVER hardcode secrets directly in your code
+(e.g., `apiKey: "AIzaSy..."` is WRONG and dangerous). Instead, you put secrets in a `.env` file,
+and `dotenv` reads that file, making the values available via `process.env`.
+
+**How it works conceptually:**
+```
+.env file:  GEMINI_API_KEY=your-secret-key-here
+                  ↓ dotenv reads this
+process.env.GEMINI_API_KEY → "your-secret-key-here"
+```
+
+---
+
+#### `import { fileURLToPath } from "url";`
+#### `import { dirname, join } from "path";`
+
+**What these do:** These are built-in Node.js tools for working with file paths.
+
+| Tool | What it does |
+|---|---|
+| `fileURLToPath` | Converts a URL like `file:///d:/project/src/geminiClient.js` into a normal path `d:\project\src\geminiClient.js` |
+| `dirname` | Gets the folder containing a file. `dirname("d:\src\file.js")` → `"d:\src"` |
+| `join` | Safely glues path parts together. `join("d:\src", "..", ".env")` → `"d:\.env"` |
+
+**Why we need them:** When using ES Modules (`import/export` syntax), the classic `__dirname`
+variable is NOT available automatically. These three tools let us recreate it safely.
+
+---
+
+#### `const __filename = fileURLToPath(import.meta.url);`
+
+**What it does:** Gets the full file path of the *current file* (`geminiClient.js`).
+`import.meta.url` gives a URL like `file:///d:/project/src/geminiClient.js`.
+`fileURLToPath` converts that into a usable Windows path.
+
+**Result:** `__filename` = `"d:\AI Engineering Practice Projects\01 — AI Study Buddy\src\geminiClient.js"`
+
+---
+
+#### `const __dirname = dirname(__filename);`
+
+**What it does:** Gets the *folder* that contains the current file.
+
+**Result:** `__dirname` = `"d:\AI Engineering Practice Projects\01 — AI Study Buddy\src"`
+
+---
+
+#### `config({ path: join(__dirname, "..", ".env") });`
+
+**What it does:** Tells `dotenv` exactly where to find the `.env` file and loads it.
+
+**Breaking it down:**
+- `__dirname` → the `src` folder
+- `".."` → go UP one level to the project root
+- `".env"` → the file to open
+
+**Full path:** `d:\AI Engineering Practice Projects\01 — AI Study Buddy\.env`
+
+**Why `".."` is there:**
+`geminiClient.js` lives inside `src/`, but the `.env` file is in the root folder.
+Without `".."`, the code looked for `.env` inside `src/`, found nothing, and failed with:
+`GEMINI_API_KEY is missing in .env file` — **this was a real bug we fixed!**
+
+**Beginner Mistake:** Putting your `.env` file in the wrong folder, or calling `config()` *after*
+you try to use `process.env`. Always call `config()` first, before anything else.
+
+---
+
+#### `const client = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });`
+
+**What it does:** Creates an authenticated connection object to Google's AI services.
+
+**Why `new`?** `GoogleGenAI` is a **Class** (a blueprint). The `new` keyword builds an actual
+*instance* from that blueprint — like taking a car blueprint and building a real car from it.
+
+**Why `process.env.GEMINI_API_KEY`?** After `dotenv` loads your `.env` file, the secret key
+is available at `process.env.GEMINI_API_KEY`. The key is never written directly in the code.
+
+---
+
+#### `export async function generateContent({ model = 'gemini-3-flash-preview', prompt, config = {} }) {`
+
+This one line does several things. Let's break each part down:
+
+**`export`** — Makes this function available to other files. Without `export`, only this file
+can use the function. Other files would get `undefined` when they try to import it.
+
+**`async`** — Marks the function as asynchronous. Calling Google's servers takes time (a network
+request), so the function needs to be able to "wait" without freezing the whole program.
+
+**`function generateContent`** — The name we give this function.
+
+**`{ model, prompt, config }`** — This is **Destructuring**. Instead of:
+```javascript
+function generateContent(options) {
+    const model = options.model;
+    const prompt = options.prompt;
+}
+```
+We pull everything out in one step: `function generateContent({ model, prompt, config })`.
+
+**Default values explained:**
+
+| Parameter | Default | Meaning |
+|---|---|---|
+| `model = 'gemini-3-flash-preview'` | If not provided, use this model | You don't have to specify the model every call |
+| `prompt` | No default — required | There's no point calling the AI without a question |
+| `config = {}` | Empty object | Prevents a crash if no config is passed |
+
+**Why `config = {}`?**
+If you call `generateContent({ prompt: "Hello" })`, the `config` argument is `undefined`.
+If the code then tries `config.temperature`, it crashes: "Cannot read properties of undefined."
+Setting `config = {}` means it becomes an empty object, and reading `.temperature` from
+an empty object safely returns `undefined` instead of crashing.
+
+---
+
+#### `if (!process.env.GEMINI_API_KEY) { throw new Error(...) }`
+
+**What it does:** A safety check before making any API call.
+
+**Why `!`?** The exclamation mark means "NOT". So `!process.env.GEMINI_API_KEY` means
+"if the key does NOT exist."
+
+**Why `throw`?** `throw` creates an error and immediately stops the function. The `catch` block
+below catches it and shows a clear, readable message instead of a confusing Google API error.
+
+---
+
+#### `const response = await client.models.generateContent({ ... })`
+
+**What it does:** The actual call to Google's AI servers.
+
+**Why `await`?** Because this is an `async` function, we can use `await`. It tells JavaScript:
+"Pause here. Wait for Google to send a reply. Then continue." Without `await`, the code would
+sprint forward immediately, and `response` would be a Promise object — not the actual text.
+
+**The object we pass in:**
+
+| Key | Value | Meaning |
+|---|---|---|
+| `model` | `'gemini-3-flash-preview'` | Which AI model to use |
+| `contents` | `prompt` | What you're asking the AI |
+| `generationConfig` | Object of "knobs" | How the AI should behave |
+
+---
+
+#### `temperature: config.temperature ?? 0.7`
+
+**What it means:** "Use the temperature the caller passed. If they didn't pass one, use 0.7."
+
+**`??` (Nullish Coalescing Operator):** Returns the right side only if the left side is `null`
+or `undefined`. It does NOT trigger on `0` or `false`, unlike the `||` operator.
+
+**Temperature Guide:**
+
+| Range | Behavior | Use For |
+|---|---|---|
+| `0.1 – 0.4` | Precise, predictable | Code generation, factual Q&A |
+| `0.5 – 0.7` | Balanced | General answers, summaries |
+| `0.8 – 1.0` | Creative, varied | Poetry, brainstorming, creative writing |
+
+---
+
+#### `topP: config.topP ?? 0.95`
+
+**What it means:** "Use the topP the caller passed, or default to 0.95."
+
+**What is `topP`?** When the AI picks the next word, it ranks all possible words by probability.
+`topP = 0.95` means: "Only choose from words that together account for 95% of the probability."
+
+**Analogy:** Picking a song from a playlist:
+- `topP = 0.1` → Only pick from the 3 most popular songs (very safe, predictable)
+- `topP = 0.95` → Pick from almost anything on the playlist (more natural and varied)
+
+---
+
+#### `maxOutputTokens: config.maxTokens ?? 2048`
+
+**What it means:** "Limit the AI's response length to this many tokens, defaulting to 2048."
+
+**What is a token?** AI models don't see "words" — they see "tokens" (chunks of characters).
+Roughly: `1000 tokens ≈ 750 words`.
+
+**Why limit it?**
+1. **Cost/Quota:** APIs charge by tokens. Limits prevent unexpected huge bills.
+2. **Relevance:** A shorter limit forces the AI to be concise.
+
+---
+
+#### `return response.text;`
+
+**What it does:** Extracts just the text string from the response object and returns it.
+
+**Why `response.text` and NOT `response.text()`?**
+This is subtle but critical:
+- `response.text` → A **property**. It's already a string. Just read it.
+- `response.text()` → Calling it as a **function**. In this version of the SDK, calling
+  it as a function returns `undefined`.
+
+**This was a real bug we hit.** Output was `undefined` until we changed `response.text()` to
+`response.text`. The lesson: always `console.log(response)` to see the raw object when
+something unexpected happens — it will show you exactly what properties are available.
+
+---
+
+#### `} catch (error) { console.error(...); throw error; }`
+
+**What it does:** Catches any error that happens inside the `try` block.
+
+**Why `throw error` again after logging it?**
+After logging, we re-throw the error so the *caller* (whoever called `generateContent`) also
+knows something went wrong. If we didn't re-throw, the error would be silently absorbed here,
+and the caller would receive `undefined` with no idea why.
+
+---
+
+#### `export default client;`
+
+**What it does:** Makes the raw `client` object (the full Gemini connection) available to import.
+
+**Why export BOTH the function AND the client?**
+- `export function generateContent` = **The pre-made meal.** 95% of the time, other files just
+  want to ask the AI a question. This function handles all the complexity for them.
+- `export default client` = **The full kitchen.** For advanced use cases — uploading files,
+  listing models, text embeddings — you need the raw client, not just `generateContent`.
+  Exporting it means any file can access the full power of Gemini without setting up the API
+  key again.
+
+---
+
+## File: `index.js`
+
+This is the **Entry Point** — the file you run directly with `node index.js`.
+It should be as simple as possible. Its only job is to use what `geminiClient.js` provides.
+
+### The Complete File (Current State)
+
+```javascript
+import { generateContent } from './src/geminiClient.js'
+
+async function run() {
+    const prompt = 'Give me 5 tips for time management';
+    console.log("🚀 AI Study Buddy is waking up...");
+
+    try {
+        const response = await generateContent({
+            prompt: prompt,
+            config: {
+                temperature: 0.5,
+                maxTokens: 100
+            }
+        });
+
+        console.log("\n--- AI Explanation ---");
+        console.log(response);
+        console.log("----------------------");
+
+    } catch (error) {
+        console.error('Error generating content: ', error.message);
+    }
+}
+
+run();
+```
+
+---
+
+### Line-by-Line Breakdown
+
+---
+
+#### `import { generateContent } from './src/geminiClient.js'`
+
+**What it does:** Brings in the `generateContent` function exported from `geminiClient.js`.
+
+**Why `'./src/geminiClient.js'` and not just `'./src'`?**
+Node.js cannot import a *folder*. You must point to the exact *file*.
+We had this exact bug earlier — `import from './src'` failed immediately.
+Always include the full filename and extension.
+
+**What does `./` mean?** "Starting from the folder where *this file* lives."
+Since `index.js` is in the root, `./src/geminiClient.js` correctly points into the `src` subfolder.
+
+---
+
+#### `async function run() { ... }`
+
+**Why `async`?** Because inside it, we use `await generateContent(...)`. You can ONLY use
+`await` inside an `async` function. There are no exceptions.
+
+**Why wrap code in a function?**
+In modern Node.js you can write `await` at the top level of a file. But wrapping in a function is
+a good habit because:
+1. It gives you a clear container with a name.
+2. It gives you a clean place to put `try/catch`.
+3. It works in older environments too.
+
+---
+
+#### `const prompt = 'Give me 5 tips for time management';`
+
+**Why store it in a variable?**
+By storing the question in `prompt`, you can reuse it, log it, or change it in one place.
+It also makes the `generateContent(...)` call below easier to read — the variable name
+tells you what the value is for.
+
+---
+
+#### `const response = await generateContent({ prompt: prompt, config: { ... } })`
+
+**Why `{ prompt: prompt }` and not just `{ prompt }`?**
+Both work! `{ prompt }` is JavaScript shorthand for `{ prompt: prompt }`. The longer form
+is used here to be more explicit and easier for beginners to read.
+
+**The commented-out line:**
+```javascript
+// prompt: 'Give me 5 tips for time management',
+```
+The `//` makes Node.js completely ignore this line. It's left as a reminder that you could
+also pass the prompt as a string directly instead of using a variable.
+
+---
+
+#### `config: { temperature: 0.5, maxTokens: 100 }`
+
+**What this does:** Overrides the default values set in `geminiClient.js`.
+- `temperature: 0.5` → Balanced answers (good for practical tips)
+- `maxTokens: 100` → Keep the response concise
+
+**We are NOT passing `topP`** — that's fine! In `geminiClient.js`, the line
+`topP: config.topP ?? 0.95` will use the default `0.95`. The `??` handles missing values gracefully.
+
+---
+
+#### `run();`
+
+**What it does:** Actually *calls* the function to start execution.
+
+**Beginner Mistake:** Defining `async function run()` but forgetting `run()` at the bottom.
+If you forget this line, your code is valid but does nothing. The terminal will exit immediately
+with no output.
+
+---
+
+## Bugs We Fixed (and Why)
+
+| # | Bug | Error Message | Root Cause | Fix Applied |
+|---|---|---|---|---|
+| 1 | Wrong import name | `SyntaxError: 'createClient' not exported` | `createClient` doesn't exist in this library version | Changed to `new GoogleGenAI(...)` |
+| 2 | `.env` not found | `GEMINI_API_KEY is missing` | `geminiClient.js` is in `src/`, but `.env` is in the root | Added `".."` to the path: `join(__dirname, "..", ".env")` |
+| 3 | Response was `undefined` | Output printed `undefined` | `response.text()` was called as a function, but it is a property | Changed `response.text()` to `response.text` |
+| 4 | Importing a folder | Module not found | `import from './src'` points to a folder, not a file | Changed to `'./src/geminiClient.js'` |
+
+---
+
+## Concepts Glossary
+
+| Term | Simple Explanation |
+|---|---|
+| `import` / `export` | The way modern JavaScript files share code with each other |
+| `async` / `await` | A way to wait for slow operations (like network calls) without freezing the program |
+| `process.env` | A place Node.js stores environment variables — secrets loaded from `.env` |
+| `try / catch` | "Try this code. If it crashes, catch the error instead of stopping the whole program." |
+| `??` (Nullish Coalescing) | "Use the left value, but if it's null/undefined, use the right as a backup" |
+| `new ClassName()` | Creates an instance (real object) from a Class (blueprint) |
+| `throw` | Deliberately causes an error, stopping the current function and passing it to `catch` |
+| Token | A chunk of text (~0.75 words) that AI models use to measure input/output size |
+| Temperature | Controls AI creativity. Low (0.1–0.4) = predictable. High (0.8–1.0) = creative. |
+| topP | Controls word diversity. Lower = safer choices. Higher = more varied language. |
+| maxOutputTokens | The maximum length of the AI's response |
+| Destructuring | Pulling values from an object in one step: `const { a, b } = obj` |
+| Named Export | `export function foo()` — imported with curly braces: `import { foo }` |
+| Default Export | `export default x` — imported without curly braces: `import x from '...'` |
+| Separation of Concerns | Keeping each file focused on one responsibility (e.g., setup vs. usage) |
+
+---
+
+*Last updated: 2026-04-22. This file grows as the project grows.*
