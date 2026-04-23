@@ -65,13 +65,14 @@ rl.on("close" , () => {
 
 /* 
     new task:
-    CLI input loop (S1)
-        Goal: User can type any topic and get a response.
+    ### Day 3 — Prompt Builder (S2)
+        Goal: Stop hardcoding prompts. Build a template system.
 
         Tasks:
-        - [ ] Write index.js with readline loop
-        - [ ] On each input: call callGemini(topic), print response
-        - [ ] Handle Ctrl+C gracefully (rl.on("close"))
-        - [ ] Add basic error handling (try/catch, print error message)
+        - [ ] Write promptBuilder.js with three functions:
+        - buildExplainPrompt(topic) — returns a zero-shot explanation prompt
+        - buildQuizPrompt(topic) — returns a JSON-forced quiz prompt
+        - buildCoTPrompt(topic) — returns a chain-of-thought prompt
+        - [ ] Update index.js to use promptBuilder
 
 */

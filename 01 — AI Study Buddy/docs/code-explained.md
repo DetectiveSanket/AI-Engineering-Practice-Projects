@@ -7,9 +7,10 @@
 ## Table of Contents
 1. [Project Structure](#project-structure)
 2. [File: `src/geminiClient.js`](#file-srcgeminiclientjs)
-3. [File: `index.js`](#file-indexjs)
-4. [Bugs We Fixed (and Why)](#bugs-we-fixed-and-why)
-5. [Concepts Glossary](#concepts-glossary)
+3. [File: `index.js` — Day 1 (Single Question)](#file-indexjs--day-1-single-question)
+4. [File: `index.js` — Day 2 (CLI Input Loop)](#file-indexjs--day-2-cli-input-loop)
+5. [Bugs We Fixed (and Why)](#bugs-we-fixed-and-why)
+6. [Concepts Glossary](#concepts-glossary)
 
 ---
 
@@ -21,7 +22,8 @@
 ├── index.js              ← The entry point. This is the file you run with `node index.js`.
 ├── package.json          ← Lists your project's name, dependencies, and scripts.
 ├── src/
-│   └── geminiClient.js   ← The "Engine Room". All AI setup and communication logic lives here.
+│   ├── geminiClient.js   ← The "Engine Room". All AI setup and communication logic lives here.
+│   └── promptBuilder.js  ← (Coming Day 3) Prompt template functions.
 └── docs/
     └── code-explained.md ← This file!
 ```
@@ -344,12 +346,12 @@ receive `undefined` with no idea why.
 
 ---
 
-## File: `index.js`
+## File: `index.js` — Day 1 (Single Question)
 
-This is the **Entry Point** — the file you run directly with `node index.js`.
-Its only job is to use what `geminiClient.js` provides.
+This was the **first version** of the entry point — it asked one hardcoded question and exited.
+It is kept here for reference so you can see how the code evolved.
 
-### The Complete File (Current State)
+### The Complete File (Day 1 State)
 
 ```javascript
 import { generateContent } from './src/geminiClient.js'
@@ -361,10 +363,7 @@ async function run() {
     try {
         const response = await generateContent({
             prompt: prompt,
-            config: {
-                temperature: 0.5,
-                maxTokens: 100
-            }
+            config: { temperature: 0.5, maxTokens: 100 }
         });
 
         console.log("\n--- AI Explanation ---");
@@ -379,77 +378,216 @@ async function run() {
 run();
 ```
 
+**Problem with this version:** The prompt is hardcoded. Every time you run the app, it asks
+the same thing. There is no way for a user to type their own question. This is why we upgraded
+to the CLI Input Loop in Day 2.
+
+---
+
+## File: `index.js` — Day 2 (CLI Input Loop)
+
+This is the **current version**. The app now stays open, waits for the user to type any topic,
+calls the AI, prints the answer, and then loops back to ask again.
+
+### The Complete File (Current State)
+
+```javascript
+import { generateContent } from './src/geminiClient.js'
+import * as readline from 'node:readline/promises';
+import { stdin as input, stdout as output } from 'node:process';
+
+const rl = readline.createInterface({ input, output });
+
+async function run() {
+    console.log("🚀 AI Study Buddy is waking up...");
+
+    while (true) {
+        const userInput = await rl.question("\n📚 Enter a topic to study: ");
+
+        if (userInput.toLowerCase() === 'exit') {
+            console.log("\n👋 Closing the AI Study Buddy. See you later!");
+            rl.close();
+            break;
+        }
+
+        try {
+            console.log("🤔 Thinking...");
+
+            const response = await generateContent({
+                prompt: userInput,
+                config: { temperature: 0.7 }
+            });
+
+            console.log("🤖 ----- AI Study Buddy: ------ ");
+            console.log(response);
+            console.log("----------------------");
+
+        } catch (error) {
+            console.error("❌ Error:", error.message);
+        }
+    }
+}
+
+run();
+
+rl.on("close", () => {
+    console.log("\n👋 Closing the AI Study Buddy. See you later!");
+    process.exit(0);
+});
+```
+
 ---
 
 ### Line-by-Line Breakdown
 
 ---
 
-#### `import { generateContent } from './src/geminiClient.js'`
+#### `import * as readline from 'node:readline/promises';`
 
-**What it does:** Brings in the `generateContent` function exported from `geminiClient.js`.
+**What it does:** Imports the entire `readline/promises` module from Node.js's built-in library.
 
-**Why `'./src/geminiClient.js'` and not just `'./src'`?**
-Node.js cannot import a *folder*. You must point to the exact *file*.
-We had this exact bug earlier — `import from './src'` failed immediately.
-Always include the full filename and extension.
+**Why `node:readline/promises` and not just `readline`?**
+- `readline` (old) uses **Callbacks** — an older, messier pattern where you pass a function
+  to be called when input arrives. This leads to "Callback Hell" — deeply nested code.
+- `readline/promises` (modern) uses **Promises/await** — it plays nicely with `async/await`
+  and makes the code look clean and sequential.
+- The `node:` prefix is a modern Node.js convention that explicitly says: "This is a built-in
+  module, not an npm package." It prevents confusion if someone creates an npm package
+  with the same name.
 
-**What does `./` mean?** "Starting from the folder where *this file* lives."
-Since `index.js` is in the root, `./src/geminiClient.js` correctly points into the `src` subfolder.
-
----
-
-#### `async function run() { ... }`
-
-**Why `async`?** Because inside it, we use `await generateContent(...)`. You can ONLY use
-`await` inside an `async` function. There are no exceptions.
-
-**Why wrap code in a named function?**
-In modern Node.js you can write `await` at the top level. But wrapping in a function is a good
-habit because it gives you a clear container with a name, a clean place for `try/catch`, and
-it works in all environments.
+**Why `import * as readline`?**
+The `readline/promises` module does not have a default export. `import * as readline` means:
+"Import everything it exports and put it all under one object called `readline`." This lets
+us call `readline.createInterface()`.
 
 ---
 
-#### `const prompt = 'Give me 5 tips for time management';`
+#### `import { stdin as input, stdout as output } from 'node:process';`
 
-**Why store in a variable?** So you can reuse it, log it, or change it in one place.
-It also makes the `generateContent(...)` call below more readable.
+**What it does:** Imports `stdin` (keyboard) and `stdout` (screen) from Node.js's `process`
+object and renames them to `input` and `output` for clarity.
 
----
+**What are `stdin` and `stdout`?**
+- `stdin` = **Standard Input** = the keyboard stream. Node.js listens here for what you type.
+- `stdout` = **Standard Output** = the screen/terminal stream. Node.js prints here.
 
-#### `const response = await generateContent({ prompt: prompt, config: { ... } })`
+**Why rename them `as input` and `as output`?**
+Pure readability. When you later write `readline.createInterface({ input, output })`, it reads
+like plain English: "Create an interface with input and output." Writing `{ stdin, stdout }`
+would also work but is slightly less clear.
 
-**Why `{ prompt: prompt }` and not just `{ prompt }`?**
-Both work! `{ prompt }` is JavaScript shorthand for `{ prompt: prompt }`. The longer form
-is used here to be more explicit for beginners.
-
-**The commented-out line:**
-```javascript
-// prompt: 'Give me 5 tips for time management',
-```
-The `//` makes Node.js completely ignore this line. It's left as a reminder that you could
-also pass the prompt string directly instead of using a variable.
+**Beginner Mistake:** Forgetting to import `stdin`/`stdout` and trying to use `readline` without
+connecting it to the terminal. The interface wouldn't know where to read from or write to.
 
 ---
 
-#### `config: { temperature: 0.5, maxTokens: 100 }`
+#### `const rl = readline.createInterface({ input, output });`
 
-**What this does:** Overrides the defaults set in `geminiClient.js`.
-- `temperature: 0.5` → Balanced answers (good for practical tips)
-- `maxTokens: 100` → Keep the response short
+**What it does:** Creates the `rl` (readline) object — the "Ear" of your application.
 
-**We are NOT passing `topP`** — that's fine! In `geminiClient.js`,
-`topP: config.topP ?? 0.95` will simply use the default `0.95`.
+**Why outside the `run()` function?**
+The interface is created **once** and lives for the entire life of the program. If you created
+it inside `run()`, a new interface would be created on every call, which could cause memory
+leaks and conflicting listeners.
+
+**What does `{ input, output }` mean here?**
+This is JavaScript **shorthand property notation**. It is equivalent to:
+`readline.createInterface({ input: input, output: output })`
+Since the variable name and the property name are the same, you can write it once.
 
 ---
 
-#### `run();`
+#### `while (true) { ... }`
 
-**What it does:** Actually *calls* the function to start execution.
+**What it does:** Creates an infinite loop that keeps the app running until we explicitly `break`
+out of it.
 
-**Beginner Mistake:** Defining `async function run()` but forgetting `run()` at the bottom.
-If you forget this line, your code is valid — but it does nothing. The terminal exits immediately.
+**Why `while (true)` and not a `for` loop?**
+A `for` loop is used when you know how many times to repeat (e.g., 10 times).
+A `while (true)` loop is used when you want to repeat **until a condition is met** — in this
+case, until the user types "exit". We don't know how many questions the user will ask.
+
+**Why is this safe?**
+It's safe because we have two exit mechanisms inside the loop:
+1. The `if (userInput === 'exit')` check with `break`.
+2. `Ctrl+C` which triggers the `rl.on("close")` event.
+Without at least one of these, the app would run forever and consume your CPU.
+
+---
+
+#### `const userInput = await rl.question("\n📚 Enter a topic to study: ");`
+
+**What it does:** Displays the prompt text in the terminal and **pauses** the code until the
+user types something and presses Enter. The typed text is stored in `userInput`.
+
+**Why `await`?** Keyboard input is asynchronous — the program doesn't know when the user will
+finish typing. `await` tells JavaScript: "Pause right here and do nothing until the user presses
+Enter. Then continue with whatever they typed."
+
+**Beginner Mistake:** Forgetting `await` before `rl.question(...)`. Without it:
+- `userInput` would be a **Promise** object, not a string.
+- The loop would sprint through without waiting, resulting in infinite questions being printed
+  instantly with no chance for the user to type anything.
+
+**What is `"\n"`?** The `\n` is a **newline character** — it moves the cursor to a new line
+before printing the prompt. It creates visual spacing between the AI's answer and the next question.
+
+---
+
+#### `if (userInput.toLowerCase() === 'exit') { rl.close(); break; }`
+
+**What it does:** Checks if the user typed "exit" (in any casing), closes the interface,
+and breaks out of the `while` loop.
+
+**Why `.toLowerCase()`?**
+Without it, the check would be case-sensitive. `"EXIT"` or `"Exit"` would NOT match `'exit'`
+and the app would not quit. `.toLowerCase()` converts any variation to lowercase first,
+so `"EXIT"`, `"Exit"`, `"eXiT"` all become `"exit"` before comparison.
+
+**Why `rl.close()` before `break`?**
+Order matters here:
+1. `rl.close()` — tells the readline interface to stop listening and release the terminal.
+   This also triggers the `rl.on("close")` event handler at the bottom of the file.
+2. `break` — exits the `while` loop and allows `run()` to finish.
+If you only used `break` without `rl.close()`, the interface would still be open, keeping
+the process alive even after the loop ends.
+
+---
+
+#### `const response = await generateContent({ prompt: userInput, config: { temperature: 0.7 } })`
+
+**What it does:** Passes the user's typed question directly to the AI and waits for a response.
+
+**The key change from Day 1:**
+Day 1 used a hardcoded string: `prompt: 'Give me 5 tips for time management'`.
+Day 2 uses the live input: `prompt: userInput`.
+This one change is what turns a "demo script" into an actual "interactive app."
+
+**Why `temperature: 0.7` (up from 0.5)?**
+We want slightly more creative and varied answers since the user can now ask about anything —
+not just one fixed topic. A balanced-to-creative setting gives more natural-feeling responses.
+
+---
+
+#### `rl.on("close", () => { process.exit(0); });`
+
+**What it does:** Registers a listener for the `"close"` event on the readline interface.
+When `rl` is closed (by `rl.close()` OR by the user pressing `Ctrl+C`), this function runs.
+
+**Why is this necessary?**
+Without this, pressing `Ctrl+C` might leave the terminal in a bad state or the process might
+hang. This ensures a **graceful shutdown** — the app cleans up and exits properly.
+
+**Why `process.exit(0)`?**
+- `process.exit()` is a Node.js command that forcefully terminates the process.
+- The `0` is the **exit code**. It means "success — nothing went wrong."
+- If you used `process.exit(1)`, it would signal "something went wrong" (useful for scripts
+  running in CI/CD pipelines that check for errors).
+
+**Why is this outside the `run()` function?**
+The `rl` object is defined at the top level (outside `run()`). Its event listener must also
+be registered at the same level. Think of it as: the `rl` object is the "security guard"
+at the door — you set up the guard when you open the building, not inside individual rooms.
 
 ---
 
@@ -486,4 +624,15 @@ If you forget this line, your code is valid — but it does nothing. The termina
 
 ---
 
-*Last updated: 2026-04-22. This file grows as the project grows.*
+| `while (true)` | An infinite loop that keeps running until you explicitly `break` out of it |
+| `stdin` | Standard Input — the keyboard stream Node.js reads from |
+| `stdout` | Standard Output — the terminal screen Node.js writes to |
+| `rl.question()` | Prints a prompt and waits for user to type a line, returning a Promise |
+| `rl.close()` | Closes the readline interface and triggers the `"close"` event |
+| `process.exit(0)` | Terminates the Node.js process. `0` = success, `1` = error |
+| `import * as X` | Imports everything from a module and bundles it under one object name `X` |
+| `as` (in import) | Renames an import for clarity: `import { stdin as input }` |
+
+---
+
+*Last updated: 2026-04-23. This file grows as the project grows.*
