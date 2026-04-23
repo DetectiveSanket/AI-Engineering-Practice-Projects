@@ -9,8 +9,11 @@
 2. [File: `src/geminiClient.js`](#file-srcgeminiclientjs)
 3. [File: `index.js` — Day 1 (Single Question)](#file-indexjs--day-1-single-question)
 4. [File: `index.js` — Day 2 (CLI Input Loop)](#file-indexjs--day-2-cli-input-loop)
-5. [Bugs We Fixed (and Why)](#bugs-we-fixed-and-why)
-6. [Concepts Glossary](#concepts-glossary)
+5. [File: `src/promptBuilder.js` — Day 3 (Prompt Templates)](#file-srcpromptbuilderjs--day-3-prompt-templates)
+6. [File: `geminiClient.js` — Day 3 Update (System Instruction)](#file-geminiclientjs--day-3-update-system-instruction)
+7. [File: `index.js` — Day 3 Update (Using promptBuilder)](#file-indexjs--day-3-update-using-promptbuilder)
+8. [Bugs We Fixed (and Why)](#bugs-we-fixed-and-why)
+9. [Concepts Glossary](#concepts-glossary)
 
 ---
 
@@ -23,7 +26,7 @@
 ├── package.json          ← Lists your project's name, dependencies, and scripts.
 ├── src/
 │   ├── geminiClient.js   ← The "Engine Room". All AI setup and communication logic lives here.
-│   └── promptBuilder.js  ← (Coming Day 3) Prompt template functions.
+│   └── promptBuilder.js  ← The "Speech Writer". Builds professional prompts from raw topics.
 └── docs/
     └── code-explained.md ← This file!
 ```
@@ -387,8 +390,8 @@ to the CLI Input Loop in Day 2.
 
 ## File: `index.js` — Day 2 (CLI Input Loop)
 
-This is the **current version**. The app now stays open, waits for the user to type any topic,
-calls the AI, prints the answer, and then loops back to ask again.
+This was the **Day 2 version**. The app stays open, waits for the user to type any topic,
+calls the AI with raw `userInput` text, prints the answer, and loops back.
 
 ### The Complete File (Current State)
 
@@ -633,6 +636,325 @@ at the door — you set up the guard when you open the building, not inside indi
 | `process.exit(0)` | Terminates the Node.js process. `0` = success, `1` = error |
 | `import * as X` | Imports everything from a module and bundles it under one object name `X` |
 | `as` (in import) | Renames an import for clarity: `import { stdin as input }` |
+| Zero-Shot Prompting | Giving the AI a task with no examples. It relies solely on its training knowledge |
+| Output Formatting | Instructing the AI to return a specific structure (e.g., JSON) instead of free-form text |
+| Chain-of-Thought (CoT) | Telling the AI to "think step-by-step" to improve accuracy on complex topics |
+| System Instruction | A permanent rule given to the AI before the conversation starts. Separate from the user message |
+| Prompt Template | A reusable function that wraps a raw topic into a full, structured AI prompt |
+| Sync function | A regular function that runs immediately and returns a value directly (no waiting) |
+| Async function | A function that can `await` slow operations. Only needed when doing I/O (network, file, DB) |
+| `{ system, message }` | A prompt object pattern: `system` = AI's permanent role, `message` = the specific user task |
+| `systemInstruction` | The Gemini SDK parameter that sets the AI's permanent behavior for the whole session |
+| Three-Layer Architecture | User input → Prompt Builder → AI Engine. Each layer has one responsibility |
+
+---
+
+## File: `src/promptBuilder.js` — Day 3 (Prompt Templates)
+
+This is the **Speech Writer** of your project. It transforms a plain topic like "Javascript"
+into a professionally structured prompt object that tells the AI exactly *how* to respond.
+
+**Why create this file?**
+Without it, your prompts are written directly inside `index.js`. This causes two problems:
+1. Your UI code (the loop) gets tangled with your AI logic (the prompt text).
+2. If you want to change how the AI explains things, you have to hunt through `index.js`.
+With `promptBuilder.js`, you change the prompt in one place and every file that uses it updates automatically.
+
+**Why are these functions NOT `async`?**
+You correctly figured this out! A function only needs to be `async` if it has to *wait* for something
+slow — like a network request, a file read, or a database query.
+These functions just build and return a plain JavaScript object (a string inside an object).
+That happens instantly in memory. Making them `async` would add unnecessary complexity with zero benefit.
+
+### The Complete File (Current State)
+
+```javascript
+// 1. buildExplainPrompt(topic) — Zero-Shot Prompting
+export function buildExplainPrompt(topic) {
+    const prompt = {
+        system: `
+            You are a helpful study assistant.
+            Explain [topic] clearly and concisely in 150 words.
+            Use simple language and provide examples if needed.
+        `,
+        message: `
+            Topic: ${topic}
+        `
+    };
+    return prompt;
+}
+
+// 2. buildQuizPrompt(topic) — Output Formatting Technique
+export function buildQuizPrompt(topic) {
+    const prompt = {
+        system: `
+            You are a helpful study assistant.
+            Create a 3-question multiple-choice quiz on "${topic}".
+            Each question should have 4 options (A, B, C, D).
+            Return the quiz in JSON format with this structure:
+            {
+                "questions": [
+                    {
+                        "question": "Question text?",
+                        "options": ["A", "B", "C", "D"],
+                        "answer": "Correct option letter"
+                    }
+                ]
+            }
+            Important: Do not include markdown backticks or explanation.
+        `,
+        message: `Quiz on: ${topic}`
+    };
+    return prompt;
+}
+
+// 3. buildCoTPrompt(topic) — Chain-of-Thought Technique
+export function buildCoTPrompt(topic) {
+    const prompt = {
+        system: `
+            You are a helpful study assistant.
+            Solve the following problem step by step.
+            Show your thinking process clearly.
+            Topic: ${topic}
+        `,
+        message: `Step-by-step explanation of: ${topic}`
+    };
+    return prompt;
+}
+```
+
+---
+
+### Line-by-Line Breakdown
+
+---
+
+#### `export function buildExplainPrompt(topic) { ... }` — Zero-Shot Technique
+
+**What it does:** Takes a raw topic string (e.g., `"Photosynthesis"`) and returns a structured
+prompt object with a `system` instruction and a `message`.
+
+**What is Zero-Shot Prompting?**
+"Zero-Shot" means giving the AI a task with **zero examples**. You trust the AI's existing training
+knowledge to handle it. It's the simplest form of prompting.
+*   **Zero-Shot:** "Explain Javascript" → AI uses its knowledge.
+*   **Few-Shot:** "Here are 2 examples of explanations... now explain Javascript." → AI copies the style.
+
+**The `system` vs `message` split:**
+- `system` = The AI's **permanent role** for this session. Think of it as a job description.
+  "You are a helpful study assistant. Explain in 150 words."
+- `message` = The **specific task** for this call. `"Topic: Javascript"`.
+
+**Why split them?** Because the AI treats system instructions differently — it cannot "forget" them
+during the conversation. User messages can be overridden, but system instructions stick.
+
+**Beginner Mistake:** Putting the topic directly in the system instruction like `"Explain ${topic}...`
+in the system string. The `system` should describe *behavior*, and the `message` should carry *data*.
+
+---
+
+#### `export function buildQuizPrompt(topic) { ... }` — Output Formatting Technique
+
+**What it does:** Instructs the AI to return a strict JSON structure instead of free-form text.
+
+**Why force JSON output?**
+If you just ask "Give me a quiz", the AI returns a chatty paragraph: "Here is your quiz! Question 1..."
+You cannot easily parse that in code. By specifying a JSON schema, the AI returns data your code can
+read with `JSON.parse()` and display in any format you want.
+
+**Key instruction in the prompt:** `"Do not include markdown backticks"`. Without this line,
+the AI wraps the JSON in ` ```json ... ``` `, which breaks `JSON.parse()` immediately.
+
+**The schema you defined:**
+```json
+{
+  "questions": [
+    { "question": "...", "options": ["A","B","C","D"], "answer": "A" }
+  ]
+}
+```
+This is called defining the **Response Schema** — telling the AI exactly what shape the output must have.
+
+---
+
+#### `export function buildCoTPrompt(topic) { ... }` — Chain-of-Thought Technique
+
+**What it does:** Forces the AI to reason step-by-step before giving a final answer.
+
+**Does it really work with just those words?**
+Yes! Here's why: LLMs (Large Language Models) predict the next most likely word based on context.
+*   Without CoT: "What is recursion?" → The AI immediately outputs a definition (might be shallow).
+*   With CoT ("think step-by-step"): The AI generates each logical step as its *next likely word*.
+    As it writes Step 1, it "sees" Step 1 when generating Step 2. Each step builds on the last.
+    This forces accuracy because the model's own output becomes its reasoning context.
+
+**The key phrase:** `"Show your thinking process clearly"` and `"step by step"`.
+These are not magic — they are statistically proven to shift the AI's token prediction toward
+more structured, sequential outputs. Research by Google showed CoT can improve math accuracy by
+over 40% on complex problems.
+
+**Analogy:** It's like asking a student to "show their work" on a math test instead of just
+writing the final answer. The process reveals (and enforces) correct reasoning.
+
+---
+
+## File: `geminiClient.js` — Day 3 Update (System Instruction)
+
+**What changed:** Two lines were updated inside the `generateContent` function.
+
+```javascript
+// BEFORE (Day 2):
+const response = await client.models.generateContent({
+    model: model,
+    contents: prompt,       // prompt was a plain string
+    generationConfig: { ... }
+});
+
+// AFTER (Day 3):
+const response = await client.models.generateContent({
+    model: model,
+    systemInstruction: prompt.system,  // NEW: AI's permanent role
+    contents: prompt.message,          // NEW: The specific task
+    generationConfig: { ... }
+});
+```
+
+**Why `systemInstruction`?**
+The Gemini API has a dedicated parameter called `systemInstruction` that is different from
+`contents` (the user message). When you pass a value here:
+- The AI treats it as a permanent rule for the entire session.
+- It cannot be overridden by the user's message.
+- It shapes the AI's *personality*, *response format*, and *behavior*.
+
+**The old commented-out line:** `// contents: prompt,`
+This is left as a historical marker showing that `prompt` used to be a plain string.
+Now it is an object `{ system, message }`, so we read `.system` and `.message` separately.
+
+**Why didn't we change the function signature?**
+The `generateContent` function still accepts `{ prompt }` — it just now *expects* `prompt` to be
+an object with `.system` and `.message`. This is a **Breaking Change** — if someone passes a plain
+string, it will crash. In a real production app, you'd add a guard:
+```javascript
+// Example guard (not yet in the code):
+if (typeof prompt === 'string') {
+    contents = prompt;
+    systemInstruction = undefined;
+} else {
+    contents = prompt.message;
+    systemInstruction = prompt.system;
+}
+```
+For now, this is fine since we control all callers.
+
+---
+
+## File: `index.js` — Day 3 Update (Using promptBuilder)
+
+**What changed:** Two additions were made to `index.js`.
+
+### The Complete File (Current State — Day 3)
+
+```javascript
+import { generateContent } from './src/geminiClient.js'
+import * as readline from 'node:readline/promises';
+import { stdin as input, stdout as output } from 'node:process';
+import { buildExplainPrompt } from './src/promptBuilder.js'; // NEW
+
+const rl = readline.createInterface({ input, output });
+
+async function run() {
+    console.log("🚀 AI Study Buddy is waking up...");
+
+    while (true) {
+        const userInput = await rl.question("\n📚 Enter a topic to study: ");
+
+        if (userInput.toLowerCase() === 'exit') {
+            console.log("\n👋 Closing the AI Study Buddy. See you later!");
+            rl.close();
+            break;
+        }
+
+        // [NEW] Build the professional prompt object first
+        const promptObject = buildExplainPrompt(userInput);
+
+        try {
+            console.log("🤔 Thinking...");
+
+            const response = await generateContent({
+                prompt: promptObject, // Was: prompt: userInput (plain string)
+                config: { temperature: 0.7 }
+            });
+
+            console.log("🤖 ----- AI Study Buddy: ------ ");
+            console.log(response);
+            console.log("----------------------");
+
+        } catch (error) {
+            console.error("❌ Error:", error.message);
+        }
+    }
+}
+
+run();
+
+rl.on("close", () => {
+    console.log("\n👋 Closing the AI Study Buddy. See you later!");
+    process.exit(0);
+});
+```
+
+---
+
+### What changed and why
+
+#### `import { buildExplainPrompt } from './src/promptBuilder.js';`
+
+**What it does:** Brings in the Zero-Shot prompt builder function from your new `promptBuilder.js`.
+
+**Why only `buildExplainPrompt` and not all three?**
+`index.js` is currently the **Explain Mode** of the app. In the future, separate files
+(`explain.js`, `quiz.js`, `params.js`) will each import the function they need.
+Importing only what you need is better practice — it keeps the file's intent clear.
+
+---
+
+#### `const promptObject = buildExplainPrompt(userInput);`
+
+**What it does:** Calls the builder with the user's raw typed text and gets back a
+structured `{ system, message }` object.
+
+**Why before the `try` block and not inside it?**
+Building the prompt cannot fail (it's just string manipulation). The `try` block is reserved
+for operations that might fail (network calls to Google). Keeping them separate makes
+debugging easier — if an error fires, you know immediately it came from the API, not the builder.
+
+**The transformation this one line performs:**
+```
+User types:  "Photosynthesis"
+        ↓  buildExplainPrompt()
+{
+  system:  "You are a helpful study assistant. Explain in 150 words...",
+  message: "Topic: Photosynthesis"
+}
+        ↓  generateContent()
+   Sent to Gemini API
+```
+
+---
+
+#### `prompt: promptObject` (was `prompt: userInput`)
+
+**The key change from Day 2:** In Day 2, `userInput` (a plain string) was passed directly
+as the prompt. In Day 3, a structured object is passed instead.
+
+**Why this matters:**
+- **Day 2:** Gemini got `"Photosynthesis"` with no context. It answered however it felt like.
+- **Day 3:** Gemini gets `"You are a study assistant... explain in 150 words"` as its system
+  rule, and `"Topic: Photosynthesis"` as the task. The response is now consistent, concise,
+  and formatted exactly as you intended.
+
+This is the core concept of **Prompt Engineering** — the quality of your prompt determines
+the quality of your AI's output more than any other factor.
 
 ---
 

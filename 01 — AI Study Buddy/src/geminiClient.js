@@ -34,7 +34,9 @@ export async function generateContent({ model = 'gemini-3-flash-preview', prompt
 
         const response = await client.models.generateContent({
             model: model,
-            contents: prompt,
+            // contents: prompt,
+            systemInstruction: prompt.system, // New part
+            contents: prompt.message,         // New part
             generationConfig: {
                 temperature: config.temperature ?? 0.7,
                 topP: config.topP ?? 0.95,

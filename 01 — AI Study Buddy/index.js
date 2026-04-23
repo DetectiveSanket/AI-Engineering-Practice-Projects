@@ -3,6 +3,9 @@ import {generateContent} from './src/geminiClient.js'
 import * as readline from 'node:readline/promises'; // This is for taking user input in the CLI  , this is a module for reading and writing data from the command line
 import { stdin as input, stdout as output } from 'node:process'; 
 
+import { buildExplainPrompt } from './src/promptBuilder.js';
+
+
 const rl = readline.createInterface({
     input ,
     output
@@ -26,13 +29,16 @@ async function run () {
             break;
         }
 
+        // [1] First, build the professional prompt object
+        const promptObject = buildExplainPrompt(userInput);
+
         // 3. call the ai with users specific input
 
         try {
             console.log("🤔 Thinking...");
 
             const response = await generateContent({
-                prompt: userInput,
+                prompt: promptObject, // This is now { system, message }
                 config: {
                     temperature: 0.7
                 }
