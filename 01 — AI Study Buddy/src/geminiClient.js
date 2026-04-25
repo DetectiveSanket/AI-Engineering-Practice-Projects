@@ -26,8 +26,11 @@ const client = new GoogleGenAI({
  * @param {string} options.prompt - The prompt text
  * @param {Object} options.config - Generation config (temperature, etc.)
  */
-export async function generateContent({ model = 'gemini-3-flash-preview', prompt, config = {} }) {
+// export async function generateContent({ model = 'gemini-3-flash-preview', prompt, config = {} }) {
+export async function generateContent({ model = 'gemini-2.5-flash', prompt, config = {} }) {
+
     try {
+
         if (!process.env.GEMINI_API_KEY) {
             throw new Error("GEMINI_API_KEY is missing in .env file");
         }
@@ -45,6 +48,7 @@ export async function generateContent({ model = 'gemini-3-flash-preview', prompt
         });
 
         return response.text;
+        
     } catch (error) {
         console.error("Gemini API Error:", error.message);
         throw error;

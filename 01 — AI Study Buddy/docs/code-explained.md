@@ -11,8 +11,10 @@
 4. [File: `index.js` — Day 2 (CLI Input Loop)](#file-indexjs--day-2-cli-input-loop)
 5. [File: `src/promptBuilder.js` — Day 3 (Prompt Templates)](#file-srcpromptbuilderjs--day-3-prompt-templates)
 6. [File: `src/explain.js` — Day 4 (The Specialist)](#file-srcexplainjs--day-4-the-specialist)
-7. [Bugs We Fixed (and Why)](#bugs-we-fixed-and-why)
-8. [Concepts Glossary](#concepts-glossary)
+7. [File: `src/params.js` — Day 4 (Parameter Experimenter)](#file-srcparamsjs--day-4-parameter-experimenter)
+8. [Decision Log: Routing Problem and Interactive Menu](#decision-log-routing-problem-and-interactive-menu)
+9. [Bugs We Fixed (and Why)](#bugs-we-fixed-and-why)
+10. [Concepts Glossary](#concepts-glossary)
 
 ---
 
@@ -776,6 +778,314 @@ It sends the `userInput` to the specialist (explain.js) and waits for them to fi
 This is called **Defensive Coding**. Even though `runExplainFlow` has its own `try/catch`, 
 this outer block protects against errors that might happen *before* the specialist starts 
 (like an import failing or a computer memory issue). It's the "Ultimate Safety Net."
+
+---
+
+*Last updated: 2026-04-25. This file grows as the project grows.*
+
+---
+
+## File: `src/params.js` — Day 4 (Parameter Experimenter)
+
+This specialist's job is to call the Gemini API **three separate times** for the same topic,
+each time using a different configuration (Temperature, TopP). The goal is to visually show
+you how AI parameters change the quality and creativity of the output.
+
+### The Complete File (Current State)
+
+```javascript
+import { generateContent } from './geminiClient.js';
+import { buildExplainPrompt } from './promptBuilder.js';
+
+export async function runParamExperiment(topic) {
+    try {
+        console.log('\n🤔 Thinking about: ' + topic + "...");
+
+        const responseA = await generateContent({
+            prompt: buildExplainPrompt(topic),
+            config: { temperature: 0.1 }
+        });
+
+        console.log('\n🤔 Thinking about (Temp 0.9): ' + topic + "...");
+
+        const responseB = await generateContent({
+            prompt: buildExplainPrompt(topic),
+            config: { temperature: 0.9 }
+        });
+
+        console.log('\n🤔 Thinking about (Temp 0.7, TopP 0.5): ' + topic + "...");
+
+        const responseC = await generateContent({
+            prompt: buildExplainPrompt(topic),
+            config: { temperature: 0.7, topP: 0.5 }
+        });
+
+        console.log("\n🤖 ----- AI Study Buddy Answer : ------ ");
+        console.log("Temperature: 0.1 (Strict/Robotic)");
+        console.log(responseA);
+        console.log("-------------------------------\n");
+
+        console.log("Temperature: 0.9 (Highly Creative)");
+        console.log(responseB);
+        console.log("-------------------------------\n");
+
+        console.log("Temperature: 0.7, TopP: 0.5 (Constrained Creativity)");
+        console.log(responseC);
+        console.log("-------------------------------\n");
+
+    } catch(error) {
+        console.error('❌ Error: ', error.message);
+    }
+}
+```
+
+---
+
+### Line-by-Line Breakdown
+
+#### Why is the same prompt (`buildExplainPrompt`) used for all three calls?
+
+This is the key principle of a **controlled experiment**. In science, when you want to measure
+the effect of one variable, you must keep all other variables the same.
+
+*   **Wrong approach:** Use a different prompt for each call. Now you don't know if the difference
+    in output was caused by the temperature OR by the prompt changing. Two variables changed.
+*   **Correct approach:** Keep the prompt identical for all 3 calls. The only changing variable
+    is the temperature/topP setting. You can now see clearly what each configuration does.
+
+---
+
+#### Why NOT use `Promise.all` to run all 3 at the same time?
+
+**I was stuck on this question.** My first instinct was to run all 3 simultaneously to save time.
+
+The answer: On the free API tier, sending 3 simultaneous requests can trigger a **429 Rate Limit
+error** (Too Many Requests). By using sequential `await` calls (one after the other), each request
+waits for the previous one to finish before starting. This is safer and more reliable.
+
+Think of it like ordering 3 meals at once vs. one at a time. If the kitchen is busy, ordering all
+3 at once can overwhelm it. Sequential ordering is slower but guaranteed to work.
+
+---
+
+#### What does each config actually produce?
+
+| Config | Temperature | TopP | Effect |
+|---|---|---|---|
+| A | 0.1 | 0.95 (default) | Very robotic, predictable, safe. Almost the same every time. |
+| B | 0.9 | 0.95 (default) | Very creative, varied vocabulary, may go off-topic slightly. |
+| C | 0.7 | 0.5 | Moderately creative but vocabulary is constrained (only top 50%). |
+
+---
+
+## Decision Log: Routing Problem and Interactive Menu
+
+This section captures a key design decision made during Day 4 development. It is written so
+that when you come back to this file in the future, you can see exactly what the problem was,
+how you thought about it, and why you chose the solution you did.
+
+---
+
+### 🚧 The Problem I Was Stuck On
+
+After the app had two specialists (`runExplainFlow` and `runParamExperiment`), the question was:
+
+> *"If I type a topic like 'JavaScript', how do I decide whether to explain it or experiment
+> with it? The app always runs the same function regardless of what I want."*
+
+The original "command-based" router looked like this:
+```javascript
+if (userInput.startsWith('compare ')) {
+    // Extract topic
+    await runParamExperiment(topic);
+} else {
+    await runExplainFlow(userInput);
+}
+```
+
+**What was wrong with this?** 
+If I typed `JavaScript`, the app always went to `runExplainFlow`. If I then wanted to experiment
+with the same topic (`JavaScript`), I had to re-type `compare JavaScript`. This felt clunky because
+the user had to decide the action *before* typing the topic.
+
+---
+
+### 💡 Two Solutions I Considered
+
+**Solution A: Interactive Menu (what we built)**
+*   You type the topic first.
+*   The app then pauses and shows a menu (1. Explain / 2. Compare).
+*   You choose the action *after* seeing your own topic.
+*   *Best for:* Students who want to be guided step by step.
+
+**Solution B: Mode Switcher**
+*   You type `/mode experiment` to flip a global setting.
+*   Every topic you type after that goes to the experimenter.
+*   You type `/mode explain` to switch back.
+*   *Best for:* Power users doing bulk testing.
+
+**I chose Solution A** because the goal is a Study Buddy app for students, not a developer tool.
+
+---
+
+### ✅ How I Implemented It (The 2-Step Loop)
+
+I changed the `while` loop from 1-step to 2-step:
+
+```javascript
+// BEFORE (1-step, command-based):
+const userInput = await rl.question("Enter a topic: ");
+// Router checked the text of userInput itself for 'compare '
+
+// AFTER (2-step, menu-based):
+// Step 1: capture topic
+const userInput = await rl.question("Enter a topic: ");
+
+// Step 2: show menu, capture choice separately
+const choice = await rl.question("Choose:\n 1. Explain\n 2. Compare\n Choice: ");
+
+// Route based on CHOICE, not the topic text
+if (choice === '2') {
+    await runParamExperiment(userInput);
+} else {
+    await runExplainFlow(userInput);
+}
+```
+
+**The Key Insight:** The topic and the action are now two separate variables. The user types
+their topic first (without any special syntax), then independently chooses what to do with it.
+
+---
+
+### 📝 Line-by-Line Explanation of the New Router
+
+#### `const choice = await rl.question("Choose an action: ...");`
+
+This is the **second** `rl.question` call inside the loop. The `while` loop now pauses here
+and waits for the user to type 1 or 2. 
+
+**Why does this work?** `rl.question` is just like a form input on a website. You can ask
+multiple questions one after the other. The user answers each and presses Enter to continue.
+
+---
+
+#### `if (choice === '2') { ... }`
+
+**Why `=== '2'` and not `=== 2`?**
+This is a critical beginner mistake. `rl.question` always returns a **string**, not a number.
+When the user types `2` and presses Enter, your variable is the string `"2"`, not the integer `2`.
+*   `"2" === 2` → `false` (different types, strict equality fails)
+*   `"2" === '2'` → `true` (both are strings)
+Always compare against a string (single or double quotes) when routing on user input.
+
+---
+
+#### Future-proofing: The commented-out `quiz` block
+
+```javascript
+// else if (choice === '3') {
+//     await runQuizFlow(userInput);
+// }
+```
+
+This is **commented out** intentionally. It is a placeholder showing exactly where Quiz Mode
+will plug in when we build `quiz.js`. When you read this file in the future, you can see:
+1.  The Quiz feature was planned from the start.
+2.  You know exactly where to uncomment and add the import.
+3.  The `else` at the bottom acts as the safe default for any invalid choice.
+
+---
+
+### 🔧 Bug Fixed: 503 Model Unavailable Error
+
+**What happened:** When testing `params.js`, the app crashed with:
+```
+Gemini API Error: {"code":503, "message":"This model is currently experiencing high demand..."}
+```
+
+**Why it happened:** The project was using `gemini-3-flash-preview`, which is an **experimental
+preview model**. Preview models are not guaranteed to be available and often get overloaded
+because many developers are testing them simultaneously.
+
+**The Fix:** Changed the default model in `geminiClient.js` to `gemini-2.0-flash`:
+
+```javascript
+// BEFORE:
+export async function generateContent({ model = 'gemini-3-flash-preview', ... })
+
+// AFTER:
+export async function generateContent({ model = 'gemini-2.0-flash', ... })
+```
+
+**Rule of Thumb:** For production or learning projects, always use a stable, non-preview model.
+Preview/experimental models are fine for testing new features but not for reliable apps.
+
+---
+
+### ✅ Final `index.js` (Current State — End of Day 4)
+
+```javascript
+import * as readline from 'node:readline/promises';
+import { stdin as input, stdout as output } from 'node:process'; 
+import { runExplainFlow } from './src/explain.js';
+import { runParamExperiment } from './src/params.js';
+
+const rl = readline.createInterface({ input, output });
+
+async function run() {
+    console.log("🚀 AI Study Buddy is waking up...");
+
+    while (true) {
+        // Step 1: Ask for the topic
+        const userInput = await rl.question("\n📚 Enter a topic to study (or type 'exit'): ");
+
+        // Handle Exit
+        if (userInput.toLowerCase() === 'exit') {
+            console.log("\n👋 Closing the AI Study Buddy. See you later!");
+            rl.close();
+            break;
+        }
+
+        // Step 2: Show the action menu
+        const choice = await rl.question("Choose an action: \n 1. Explain \n 2. Compare \n Choice: ");
+
+        // Step 3: Route to the correct specialist
+        try {
+            if (choice === '2') {
+                await runParamExperiment(userInput);
+            }
+            // else if (choice === '3') {
+            //     await runQuizFlow(userInput);   <- Quiz coming soon!
+            // }
+            else {
+                await runExplainFlow(userInput);
+            }
+        } catch (error) {
+            console.error("❌ Main Loop Error:", error.message);
+        }
+    }
+}
+
+run();
+
+rl.on("close", () => {
+    process.exit(0);
+});
+```
+
+---
+
+| `Promise.all` | Runs multiple async tasks at the same time (parallel). Use with caution on free API tiers. |
+| `Promise.allSettled` | Like `Promise.all` but waits for ALL to finish even if some fail |
+| Sequential `await` | Running async calls one at a time. Slower but safer and easier to debug |
+| Interactive Menu | A CLI pattern where the app asks the user follow-up questions to choose an action |
+| `startsWith()` | String method that checks if a string begins with a specific prefix |
+| `substring(n)` | Returns a new string starting from index `n`, removing the first `n` characters |
+| `=== '2'` vs `=== 2` | String comparison vs number comparison. `rl.question` always returns a string |
+| 503 Error | "Service Unavailable" — the server is overloaded. Common with preview/experimental models |
+| Rate Limit (429) | Too many requests in a short time. Free API tiers have limits on calls per minute |
+| Preview Model | An experimental model version. Not production-stable, often overloaded |
+| Stable Model | A production-ready model version. Recommended for apps and learning projects |
 
 ---
 

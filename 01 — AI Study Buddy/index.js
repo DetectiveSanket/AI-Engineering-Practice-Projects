@@ -1,6 +1,7 @@
 import * as readline from 'node:readline/promises';
 import { stdin as input, stdout as output } from 'node:process'; 
 import { runExplainFlow } from './src/explain.js';
+import {runParamExperiment} from './src/params.js';
 
 const rl = readline.createInterface({ input, output });
 
@@ -18,11 +19,25 @@ async function run() {
             break;
         }
 
-        // 3. Delegate to Specialists
+        //3. check the user choice for answer;
+        const choice = await rl.question("Choose an action: \n 1. Explain \n 2. Compare \n Choice: ");
+
+        // 4. Delegate to Specialists (The Router)
         try {
-            // Currently, every input triggers an explanation
-            // In the future, we will add 'quiz' or 'compare' logic here
-            await runExplainFlow(userInput);
+
+            // await runExplainFlow(userInput);
+            // await runParamExperiment(userInput);
+
+            // if user wants to compare: 
+            if (choice === '2') {
+                await runParamExperiment(userInput);
+            }
+
+            else {
+                // Default fallback: Explain
+                await runExplainFlow(userInput);
+            }
+
         } catch (error) {
             console.error("❌ Main Loop Error:", error.message);
         }
