@@ -1,64 +1,37 @@
-
-import {generateContent} from './src/geminiClient.js'
-import * as readline from 'node:readline/promises'; // This is for taking user input in the CLI  , this is a module for reading and writing data from the command line
+import * as readline from 'node:readline/promises';
 import { stdin as input, stdout as output } from 'node:process'; 
+import { runExplainFlow } from './src/explain.js';
 
-import { buildExplainPrompt } from './src/promptBuilder.js';
+const rl = readline.createInterface({ input, output });
 
-
-const rl = readline.createInterface({
-    input ,
-    output
-});
-
-
-async function run () {
-
+async function run() {
     console.log("🚀 AI Study Buddy is waking up...");
 
-    while(true) {
+    while (true) {
+        // 1. Ask the user for a topic
+        const userInput = await rl.question("\n📚 Enter a topic to study (or type 'exit'): ");
 
-        // 1. ask the user for a topic.
-        const userInput = await rl.question("\n📚 Enter a topic to study: ");
-
-
-        // 2. check if user want to exit the app or not
-        if(userInput.toLowerCase() === 'exit') {
+        // 2. Handle Exit
+        if (userInput.toLowerCase() === 'exit') {
             console.log("\n👋 Closing the AI Study Buddy. See you later!");
             rl.close();
             break;
         }
 
-        // [1] First, build the professional prompt object
-        const promptObject = buildExplainPrompt(userInput);
-
-        // 3. call the ai with users specific input
-
+        // 3. Delegate to Specialists
         try {
-            console.log("🤔 Thinking...");
-
-            const response = await generateContent({
-                prompt: promptObject, // This is now { system, message }
-                config: {
-                    temperature: 0.7
-                }
-            });
-
-            console.log("🤖 ----- AI Study Buddy: ------ ");
-            console.log(response);
-            console.log("----------------------");
-
-        }
-        catch(error) {
-             console.error("❌ Error:", error.message);
+            // Currently, every input triggers an explanation
+            // In the future, we will add 'quiz' or 'compare' logic here
+            await runExplainFlow(userInput);
+        } catch (error) {
+            console.error("❌ Main Loop Error:", error.message);
         }
     }
 }
 
 run();
 
-rl.on("close" , () => {
-    console.log("\n👋 Closing the AI Study Buddy. See you later!");
+rl.on("close", () => {
     process.exit(0);
 });
 
@@ -71,14 +44,26 @@ rl.on("close" , () => {
 
 /* 
     new task:
-    ### Day 3 — Prompt Builder (S2)
-        Goal: Stop hardcoding prompts. Build a template system.
+    ├── explain.js         ← plain-text explanation flow
+    ├── quiz.js            ← JSON-forced quiz generation
+    ├── params.js          ← parameter experiment runner
 
-        Tasks:
-        - [ ] Write promptBuilder.js with three functions:
-        - buildExplainPrompt(topic) — returns a zero-shot explanation prompt
-        - buildQuizPrompt(topic) — returns a JSON-forced quiz prompt
-        - buildCoTPrompt(topic) — returns a chain-of-thought prompt
-        - [ ] Update index.js to use promptBuilder
+
+    * explain.js
+    goal: structured prompt -> simple text explanation
+
+    ### Day 4 — Parameter experimenter (S4, params.js)
+    Goal: See how temperature and top_p change the output.
+
+    Tasks:
+    - [ ] Write params.js — function runParamExperiment(topic)
+    - [ ] Call Gemini 3 times for same topic with different configs:
+    - Config A: temperature 0.1 (deterministic)
+    - Config B: temperature 0.9 (creative)
+    - Config C: temperature 0.7, topP 0.5 (constrained)
+    - [ ] Print all 3 outputs side by side with labels
+    - [ ] Add a "compare" command to CLI: type "compare recursion" to trigger this
+
+
 
 */
