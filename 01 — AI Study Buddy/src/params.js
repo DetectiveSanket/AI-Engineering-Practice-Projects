@@ -5,9 +5,8 @@ import {buildExplainPrompt , buildCoTPrompt} from './promptBuilder.js'
 export async function runParamExperiment(topic) {
 
     try{
-
-        console.log('\n🤔 Thinking about: ' + topic + "...");
         
+        console.log('\n🤔 Thinking about (Temp 0.1): ' + topic + "...");
         const responseA = await generateContent({
             prompt : buildExplainPrompt(topic),
             config: {
@@ -16,7 +15,6 @@ export async function runParamExperiment(topic) {
         });
 
         console.log('\n🤔 Thinking about (Temp 0.9): ' + topic + "...");
-
         const responseB = await generateContent({
             prompt: buildExplainPrompt(topic),
             config: {
@@ -25,7 +23,6 @@ export async function runParamExperiment(topic) {
         });
 
         console.log('\n🤔 Thinking about (Temp 0.7, TopP 0.5): ' + topic + "...");
-
         const responseC = await generateContent({
             prompt : buildExplainPrompt(topic),
             config : {

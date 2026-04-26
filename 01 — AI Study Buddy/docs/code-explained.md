@@ -1090,3 +1090,396 @@ rl.on("close", () => {
 ---
 
 *Last updated: 2026-04-25. This file grows as the project grows.*
+
+---
+
+## File: `src/quiz.js` — Day 5 (The Quiz Game)
+
+This specialist has two jobs:
+1.  **`generateQuiz(topic)`** — calls the Gemini API with a strict JSON-only prompt and parses the response into a usable JavaScript object.
+2.  **`runQuizFlow(topic, rl)`** — takes that parsed object and runs an interactive one-question-at-a-time game loop in the terminal.
+
+### The Complete File (Current State)
+
+```javascript
+import { generateContent } from './geminiClient.js';
+import { buildQuizPrompt } from './promptBuilder.js';
+
+export async function generateQuiz(topic) {
+    try {
+        const response = await generateContent({
+            prompt: buildQuizPrompt(topic),
+            config: {
+                temperature: 0.2,
+                maxTokens: 450
+            }
+        });
+
+        // Bulletproof JSON Extraction
+        const targetIndex = response.indexOf('"questions"');
+
+        if (targetIndex === -1) {
+            console.error("\n[DEBUG] AI failed to output questions. Raw response:\n", response);
+            throw new Error("AI response did not contain the 'questions' array.");
+        }
+
+        const start = response.lastIndexOf('{', targetIndex);
+        const end = response.lastIndexOf('}');
+
+        if (start === -1 || end === -1) {
+            throw new Error("AI response did not contain valid JSON brackets.");
+        }
+
+        const jsonString = response.substring(start, end + 1);
+
+        let data;
+        try {
+            data = JSON.parse(jsonString);
+        } catch (parseError) {
+            console.error("\n[DEBUG] The AI generated invalid JSON:\n", jsonString);
+            throw new Error(`JSON Parsing crashed: ${parseError.message}`);
+        }
+
+        console.log('✅ Quiz Generated! Here are your questions:');
+        return data;
+
+    } catch(error) {
+        throw new Error(`Failed to generate quiz: ${error.message}`);
+    }
+}
+
+export async function runQuizFlow(topic, rl) {
+    console.log(`🧠 Generating a ${topic} Quiz for you...`);
+    const quiz = await generateQuiz(topic);
+    const questions = quiz.questions;
+
+    for (let i = 0; i < questions.length; i++) {
+        const q = questions[i];
+
+        console.log(`\n--- Question ${i + 1} of ${questions.length} ---`);
+        console.log(q.question);
+        console.log(`A. ${q.options.A}`);
+        console.log(`B. ${q.options.B}`);
+        console.log(`C. ${q.options.C}`);
+        console.log(`D. ${q.options.D}`);
+
+        const answer = await rl.question('\nYour answer (A-D): ');
+
+        if (answer.toUpperCase() === q.answer.toUpperCase()) {
+            console.log('\n✅ Correct!\n');
+        } else {
+            console.log(`\n❌ Wrong! The correct answer was ${q.answer}. ${q.options[q.answer]}\n`);
+        }
+    }
+
+    console.log('\n🎉 Quiz finished! Well done.\n');
+}
+```
+
+---
+
+## Decision Log: Day 5 — Errors Encountered and How They Were Fixed
+
+This section documents the real debugging journey of Day 5. When you read this
+in the future, you will see exactly what went wrong, why it went wrong, and
+what the correct fix was. These are not beginner mistakes — they are the same
+problems every professional developer faces when working with LLM APIs.
+
+---
+
+### 🚧 Error 1 — "topic is not a function"
+
+**Type:** Hidden Syntax Error (SyntaxError at runtime, disguised as a wrong error message)
+
+**What we saw in the terminal:**
+```
+❌ Main Loop Error: Failed to generate quiz: topic is not a function
+```
+
+**Why it happened:**
+In `promptBuilder.js`, the `buildQuizPrompt` function used backtick characters
+inside a template literal (backtick string). This broke the string early:
+
+```javascript
+// BROKEN:
+system: `
+    Important: "Do not include markdown backticks like ` ` `` json"
+`
+```
+
+JavaScript reads the first backtick inside the string as the end of the whole
+template literal. Everything after it was broken JavaScript syntax. When the
+SDK received the broken prompt object, it could not call the function correctly,
+which produced the misleading "is not a function" error.
+
+**How we fixed it:**
+Replaced the literal backticks inside the string with single-quoted equivalents
+so they did not conflict with the outer template literal delimiters.
+
+**Lesson:** When you see a runtime error that says something "is not a function"
+but you know it IS a function, the real problem is almost always something
+syntactically broken nearby that is corrupting the data before it reaches the
+function call.
+
+---
+
+### 🚧 Error 2 — "response.text is not a function" / "topic is not a function" (Redux)
+
+**Type:** Wrong method call on a string (TypeError)
+
+**What we saw in the terminal:**
+```
+❌ Main Loop Error: Failed to generate quiz: topic is not a function
+```
+
+**Why it happened:**
+In `geminiClient.js`, the `generateContent` function already calls `response.text`
+and returns the raw string. But in `quiz.js`, the code tried to call `.text()`
+again on that string:
+
+```javascript
+// geminiClient.js already does this:
+return response.text;  // returns a plain string
+
+// quiz.js was doing this — WRONG:
+let text = await response.text();  // calling .text() on a string!
+```
+
+A plain JavaScript string does not have a `.text()` method. Calling a method
+that does not exist on a value produces a `TypeError`. Because this happened
+inside the `catch` block which rethrows with a new error message, the original
+error message got swallowed.
+
+**How we fixed it:**
+Removed the second `.text()` call in `quiz.js`. Since `generateContent` already
+returns a string, we use it directly: `let text = response;`
+
+**Lesson:** When data passes through multiple functions, trace what type it is at
+every step. A string is not a Response object. Always check what the function you
+are calling actually returns.
+
+---
+
+### 🚧 Error 3 — "Unexpected token 'O', 'Okay, let…'" (JSON SyntaxError)
+
+**Type:** JSON.parse failure on conversational text
+
+**What we saw in the terminal:**
+```
+❌ Main Loop Error: Failed to generate quiz: Unexpected token 'O', "Okay, let'"... is not valid JSON
+```
+
+**Why it happened:**
+Even though we asked the AI for "JSON only", the experimental model (`gemini-3-flash-preview`)
+added conversational text before the JSON:
+
+```
+Okay, let's create a quiz for you! {"questions": [...]}
+```
+
+`JSON.parse()` is extremely strict. It expects to start reading a `{` or `[`
+immediately. The letter "O" from "Okay" is not valid JSON, so it crashes
+instantly.
+
+**How we fixed it:**
+We implemented **targeted JSON extraction** using `response.indexOf('"questions"')`
+to find where the actual data starts, then `lastIndexOf('{', targetIndex)` to
+search backwards for the opening bracket that belongs to the quiz object.
+This surgically extracts just the JSON and ignores any text before or after it.
+
+**Lesson:** Never trust an LLM to return perfectly formatted data. Always extract
+the target data defensively from the string rather than passing the whole
+response to `JSON.parse`.
+
+---
+
+### 🚧 Error 4 — "Unexpected non-whitespace character after JSON at position 2"
+
+**Type:** JSON.parse failure due to multiple JSON objects in the response
+
+**What we saw in the terminal:**
+```
+❌ Main Loop Error: Failed to generate quiz: Unexpected non-whitespace character after JSON at position 2 (line 1 column 3)
+```
+
+**Why it happened:**
+The experimental model was "stuttering" — it sometimes outputs an empty `{}`
+before the real data:
+
+```
+{} {"questions": [...]}
+```
+
+Our original extraction looked for the FIRST `{`, which found the empty one.
+It extracted `{} {"questions"...}`. When `JSON.parse` successfully parsed
+the empty `{}` at position 0, it encountered the SECOND `{` at position 2 and
+panicked because there was non-whitespace after a complete JSON object.
+
+**How we fixed it:**
+Changed the extraction strategy to search backwards from the keyword `"questions"`:
+
+```javascript
+const targetIndex = response.indexOf('"questions"');  // find the data keyword
+const start = response.lastIndexOf('{', targetIndex); // find ITS opening bracket
+const end = response.lastIndexOf('}');
+```
+
+By anchoring to the word `"questions"` and searching backwards from it, we
+bypass any empty brackets or garbage before the real JSON object.
+
+**Lesson:** `response.lastIndexOf('{', somePosition)` is a very useful pattern
+when dealing with AI output. It means: "find the last `{` that appears BEFORE
+this position." This guarantees you grab the bracket that belongs to the data
+you care about, not any stutter brackets before it.
+
+---
+
+### 🚧 Error 5 — "AI response did not contain the 'questions' array" (Root Cause)
+
+**Type:** The model completely ignoring the system instruction
+
+**What we saw in the terminal:**
+```
+[DEBUG] AI failed to output questions. Raw response:
+ Here's a 3-question quiz on C++, covering fundamental concepts...
+
+❌ Main Loop Error: Failed to generate quiz: AI response did not contain the 'questions' array.
+```
+
+**Why it happened:**
+This was the most important bug of Day 5. The prompt was split into two parts:
+-  `system` (systemInstruction): "You are a JSON-only API..."
+-  `message` (contents): "Generate a 3-question quiz on: C++"
+
+The experimental model (`gemini-3-flash-preview`) was **ignoring the systemInstruction
+field entirely** and only reading the `message`. The message sounded like a friendly
+study request, so the model generated a beautiful markdown quiz — completely ignoring
+the JSON requirement.
+
+**How we fixed it:**
+Moved the ENTIRE instruction — including the JSON-only requirement and the complete
+template example — into the `message` field where the model always reads it.
+We also used a "priming" technique: the message ends with the exact JSON structure
+we expect, forcing the model to fill it in with real content rather than generate
+a prose answer.
+
+```javascript
+message: `Generate EXACTLY 3 multiple-choice quiz questions about "${topic}".
+
+Rules:
+- Return ONLY a raw JSON object. No markdown. No backticks. No explanation. No greeting.
+- Each question must have 4 options labeled A, B, C, D.
+
+Use this exact structure:
+{"questions":[{"question":"...","options":{"A":"...","B":"...","C":"...","D":"..."},"answer":"A"}, ...]}`
+```
+
+**Lesson:** For experimental models, treat `systemInstruction` as unreliable.
+Put your most important constraints (especially output format requirements) directly
+in the `message`/`contents` where you know the model reads it. The "JSON template
+at the end of the message" technique is a well-known prompt engineering pattern
+called **few-shot formatting** or **output priming**.
+
+---
+
+### 🚧 Error 6 — The "Two Bosses" Problem (rl.createInterface conflict)
+
+**Type:** Logic Bug — duplicate readline interface
+
+**What would happen at runtime:**
+If two `readline.createInterface` instances both listen to `process.stdin`,
+Node.js gets confused about which one should receive keyboard input. The result
+is unpredictable: sometimes input is swallowed, sometimes the app freezes.
+
+**Why it happened:**
+`quiz.js` created its own `rl` instance to ask the user for answers. But
+`index.js` already had an `rl` instance managing the main loop. You cannot have
+two bosses fighting over the keyboard at the same time.
+
+**How we fixed it:**
+Pass the existing `rl` from `index.js` down into `runQuizFlow` as a parameter:
+
+```javascript
+// index.js:
+await runQuizFlow(userInput, rl);  // pass the Boss's rl down
+
+// quiz.js:
+export async function runQuizFlow(topic, rl) {  // accept it as a parameter
+    const answer = await rl.question('Your answer: ');  // use the same rl
+}
+```
+
+**Lesson:** In any application that uses a shared resource (keyboard, file handle,
+database connection), only one part of the code should own that resource. Pass it
+down to the functions that need it rather than creating a new one in each function.
+This is called the **Single Owner** or **Dependency Injection** pattern.
+
+---
+
+### 🚧 Error 7 — The "All Questions at Once" Scope Bug
+
+**Type:** Logic Bug — the `for` loop printed all questions before asking for any answer
+
+**What would happen at runtime:**
+All 3 questions printed immediately to the terminal. Then, because `rl.question`
+and the `if/else` check were OUTSIDE the `for` loop, the variable `q` no longer
+existed when the code tried to check `q.answer`. Result: `ReferenceError: q is
+not defined`.
+
+**How we fixed it:**
+Moved the `rl.question` and the answer-checking `if/else` block INSIDE the `for`
+loop's curly braces `{ }`. This means: for every iteration, print the question,
+wait for the answer, check it, and only THEN advance to the next question.
+
+```javascript
+for (let i = 0; i < questions.length; i++) {
+    const q = questions[i];       // q exists here
+    console.log(q.question);      // show question
+    const answer = await rl.question('Answer: '); // wait for user
+    if (answer === q.answer) { ... }  // q still exists here
+}
+// q is gone after the loop — correctly scoped
+```
+
+**Lesson:** Variable scope in `for` loops is one of the most common beginner bugs.
+Always ask: "Is the variable I am using still alive at this line?" `q` only exists
+inside the loop body `{ }`. The moment you step outside those braces, `q` is gone.
+
+---
+
+### ✅ Final Architecture — End of Day 5
+
+At the end of Day 5, the app has three working modes:
+
+| User Input | Mode | Specialist Called |
+|---|---|---|
+| Type topic → choose 1 | Explain | `runExplainFlow(topic)` |
+| Type topic → choose 2 | Compare | `runParamExperiment(topic)` |
+| Type topic → choose 3 | Quiz | `runQuizFlow(topic, rl)` |
+
+The quiz game loop:
+1. Calls `generateQuiz(topic)` to get parsed JSON data.
+2. Iterates through `data.questions` one at a time.
+3. Waits for the user to type A, B, C, or D.
+4. Immediately tells the user if they are right or wrong.
+5. Moves to the next question until all are done.
+6. Prints "🎉 Quiz finished!" to signal completion.
+
+---
+
+| New Term | Meaning |
+|---|---|
+| Syntax Error | Code that JavaScript cannot read at all, like a broken string or missing bracket |
+| TypeError | Calling a method that doesn't exist on a value (e.g., `.text()` on a string) |
+| JSON.parse() | Built-in JS function that converts a JSON string into a JavaScript object |
+| Priming | Ending your prompt with the start of the expected output to guide the model |
+| Few-shot formatting | Showing the model an example of exactly what output format you want |
+| systemInstruction | A field in the Gemini SDK that sets the model's "personality" — unreliable on experimental models |
+| contents | The user message field in the Gemini SDK — the model ALWAYS reads this |
+| Dependency Injection | Passing a shared resource (like `rl`) into a function rather than creating a new one |
+| Single Owner Pattern | Only one part of the code controls a shared resource, preventing conflicts |
+| Scope | The region of code where a variable is alive and accessible |
+
+---
+
+*Last updated: 2026-04-26. This file grows as the project grows.*

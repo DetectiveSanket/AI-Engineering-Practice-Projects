@@ -37,17 +37,30 @@ export async function generateContent({ model = 'gemini-2.5-flash', prompt, conf
 
         const response = await client.models.generateContent({
             model: model,
+
             // contents: prompt,
-            systemInstruction: prompt.system, // New part
-            contents: prompt.message,         // New part
+            // systemInstruction: prompt.system, // New part
+            // contents: prompt.message,  
+
+            systemInstruction: prompt.system,
+            contents: [prompt.message], // Fixed: Must be an array in this SDK
+
             generationConfig: {
-                temperature: config.temperature ?? 0.7,
+                temperature: config.temperature ?? 0.6,
                 topP: config.topP ?? 0.95,
-                maxOutputTokens: config.maxTokens ?? 500,
+                maxOutputTokens: config.maxTokens ?? 800,
             }
         });
 
-        return response.text;
+        // return response.text;
+
+        // ─── DEBUG: see the raw SDK response before calling .text ───
+        // console.log('[DEBUG] response type:', typeof response);
+        // console.log('[DEBUG] response.text type:', typeof response.text);
+        // console.log('[DEBUG] response.candidates:', JSON.stringify(response.candidates ?? 'N/A'));
+
+        // The SDK might return a function or a string; we ensure it's a string
+        return typeof response.text === 'function' ? response.text() : response.text;
         
     } catch (error) {
         console.error("Gemini API Error:", error.message);
@@ -56,3 +69,4 @@ export async function generateContent({ model = 'gemini-2.5-flash', prompt, conf
 }
 
 export default client;
+

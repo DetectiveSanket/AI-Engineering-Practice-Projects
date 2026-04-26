@@ -2,6 +2,8 @@ import * as readline from 'node:readline/promises';
 import { stdin as input, stdout as output } from 'node:process'; 
 import { runExplainFlow } from './src/explain.js';
 import {runParamExperiment} from './src/params.js';
+import { generateQuiz, runQuizFlow } from './src/quiz.js';
+
 
 const rl = readline.createInterface({ input, output });
 
@@ -20,7 +22,7 @@ async function run() {
         }
 
         //3. check the user choice for answer;
-        const choice = await rl.question("Choose an action: \n 1. Explain \n 2. Compare \n Choice: ");
+        const choice = await rl.question("Choose an action: \n 1. Explain \n 2. Compare \n 3. Quiz \n Choice: ");
 
         // 4. Delegate to Specialists (The Router)
         try {
@@ -33,8 +35,13 @@ async function run() {
                 await runParamExperiment(userInput);
             }
 
+            // if user wants a quiz
+            else if(choice === '3') {
+                await runQuizFlow(userInput , rl);
+            }
+
+            // Default fallback: Explain
             else {
-                // Default fallback: Explain
                 await runExplainFlow(userInput);
             }
 
@@ -51,34 +58,35 @@ rl.on("close", () => {
 });
 
 
-//  we can give specific instructions to the AI model for a tailored response, use lower temperature (0.1-0.4) for deterministic and precise responses, use higher temperature (0.7-1.0) for creative and diverse responses, for factual accuracy and code generation, use lower temperature, for content creation, poetry, and creative writing, use higher temperature.
-
-
-// const rl = readline.createInterface({ input, output }); //  readline.createInterface is used to create an interface for reading and writing data from the command line , it is a constructor for the readline module , it takes an object with input and output as properties , the input and output are streams , the input stream is the standard input stream , the output stream is the standard output stream 
-
-
 /* 
     new task:
-    ├── explain.js         ← plain-text explanation flow
-    ├── quiz.js            ← JSON-forced quiz generation
+    ├── explain.js         ← plain-text explanation flow - done
+    ├── quiz.js            ← JSON-forced quiz generation - done
     ├── params.js          ← parameter experiment runner
 
 
-    * explain.js
-    goal: structured prompt -> simple text explanation
+    ### Day 5 — Quiz generator with JSON parsing (S4, quiz.js)
+        Goal: Force structured output and parse it reliably.
 
-    ### Day 4 — Parameter experimenter (S4, params.js)
-    Goal: See how temperature and top_p change the output.
+        Tasks:
+        - [ ] Write quiz.js — function generateQuiz(topic)
+        - [ ] Call Gemini with buildQuizPrompt(topic)
+        - [ ] Parse the JSON response safely:
+        - Strip markdown fences if present (```json ... ```)
+        - JSON.parse() inside try/catch
+        - If parse fails: retry once with a stricter prompt
+        - [ ] Display: question, A/B/C/D options, wait for user input, reveal answer
+        - [ ] Add "quiz" command to CLI: type "quiz sorting algorithms"
 
-    Tasks:
-    - [ ] Write params.js — function runParamExperiment(topic)
-    - [ ] Call Gemini 3 times for same topic with different configs:
-    - Config A: temperature 0.1 (deterministic)
-    - Config B: temperature 0.9 (creative)
-    - Config C: temperature 0.7, topP 0.5 (constrained)
-    - [ ] Print all 3 outputs side by side with labels
-    - [ ] Add a "compare" command to CLI: type "compare recursion" to trigger this
+        Key problem you will hit: Gemini sometimes wraps JSON in ```json fences even when told not to.
+        Fix: response.replace(/```json|```/g, "").trim() before parsing.
 
+        Definition of done: You can take a working quiz on any topic.
 
+    > The Game Loop: Instead of just printing the whole quiz at once, we will build a loop in quiz.js that:
+        Prints one question at a time.
+        Wait for you to type A, B, C, or D.
+        Tells you immediately if you are Right or Wrong.
+        Moves to the next question.
 
 */

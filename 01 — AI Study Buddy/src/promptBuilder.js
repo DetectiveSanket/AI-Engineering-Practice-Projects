@@ -16,7 +16,7 @@ export function buildExplainPrompt(topic) {
     const prompt = {
         system :`
             You are a helpful study assistant.
-            Explain [topic] clearly and concisely in 150 words .
+            Explain [topic] clearly and concisely .
             Use simple language and provide examples if needed.
         `,
 
@@ -30,29 +30,23 @@ export function buildExplainPrompt(topic) {
     return prompt;
 };
 
-// 2. `buildQuizPrompt(topic)` — The "Output Format" Technique
+// 2. `buildQuizPrompt(topic)` — The "Output Format" Technique
 export function buildQuizPrompt(topic) {
     const prompt = {
-        system: `
-            You are a helpful study assistant. 
-            Create a 3-question multiple-choice quiz on "${topic}".
-            Each question should have 4 options (A, B, C, D).
-            Return the quiz in JSON format with this structure:
-            {
-                "questions": [
-                    {
-                        "question": "Question text?",
-                        "options": ["A", "B", "C", "D"],
-                        "answer": "Correct option letter"
-                    }
-                ]
-            }
+        // Keep system minimal — experimental models often ignore it
+        system: `You are a JSON API. You only output valid JSON. No other text.`,
 
-            Important: "Do not include markdown backticks like ` ` `` json"
-            "Also do not include explanation"
-        `,
+        // The FULL instruction lives in the message (contents), which the model always reads.
+        // We end the message with the opening of the JSON so the model is FORCED to continue it.
+        message: `Generate EXACTLY 3 multiple-choice quiz questions about "${topic}".
 
-        message: `Quiz on: ${topic}`
+Rules:
+- Return ONLY a raw JSON object. No markdown. No backticks. No explanation. No greeting.
+- Each question must have 4 options labeled A, B, C, D.
+- The "answer" field must be the letter (A, B, C, or D) of the correct option.
+
+Use this exact structure:
+{"questions":[{"question":"Question text?","options":{"A":"Option text","B":"Option text","C":"Option text","D":"Option text"},"answer":"A"},{"question":"Question text?","options":{"A":"Option text","B":"Option text","C":"Option text","D":"Option text"},"answer":"B"},{"question":"Question text?","options":{"A":"Option text","B":"Option text","C":"Option text","D":"Option text"},"answer":"C"}]}`
     };
     return prompt;
 };
