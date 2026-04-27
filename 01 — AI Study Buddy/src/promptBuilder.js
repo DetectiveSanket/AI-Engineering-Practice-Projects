@@ -64,3 +64,24 @@ export function buildCoTPrompt(topic) {
     };
     return prompt;
 };
+
+//4. buildComparePrompt(topic) - for stragtegies module
+
+export function buildComparePrompt(topic){
+
+    const prompt = {
+        system: `
+            You are an AI explanation engine that demonstrates how subtle prompt/parameter changes alter outputs.
+            Explain [topic] clearly and concisely.
+            Use simple language but provide deep insights where relevant.
+            Give a brief, single-paragraph explanation. Be concise.
+            Please keep your answers concise, with a minimum of 100 words and a maximum of 150 words.
+        `,
+
+        message: `
+            Topic: ${topic}
+        `
+    };
+
+    return prompt;
+};

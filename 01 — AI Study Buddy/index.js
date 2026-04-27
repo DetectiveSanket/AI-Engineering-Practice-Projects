@@ -3,6 +3,7 @@ import { stdin as input, stdout as output } from 'node:process';
 import { runExplainFlow } from './src/explain.js';
 import {runParamExperiment} from './src/params.js';
 import { runQuizFlow } from './src/quiz.js';
+import { compareStrategies } from './src/strategies.js'
 
 
 const rl = readline.createInterface({ input, output });
@@ -22,7 +23,7 @@ async function run() {
         }
 
         //3. check the user choice for answer;
-        const choice = await rl.question("Choose an action: \n 1. Explain \n 2. Compare \n 3. Quiz \n Choice: ");
+        const choice = await rl.question("Choose an action: \n 1. Explain \n 2. Compare \n 3. Quiz \n 4. Strategy Lab \n Choice: ");
 
         // 4. Delegate to Specialists (The Router)
         try {
@@ -38,6 +39,11 @@ async function run() {
             // if user wants a quiz
             else if(choice === '3') {
                 await runQuizFlow(userInput , rl);
+            }
+
+            // if user wants strategies
+            else if(choice === '4') {
+                await compareStrategies(userInput);
             }
 
             // Default fallback: Explain

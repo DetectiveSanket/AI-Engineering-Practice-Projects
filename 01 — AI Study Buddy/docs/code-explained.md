@@ -1713,3 +1713,116 @@ When the user picks 4, it will call `compareStrategies(topic)` from `strategies.
 ---
 
 *Last updated: 2026-04-27. This file grows as the project grows.*
+
+---
+
+## Day 7 — The Strategy Lab: Theory & Why It Exists
+
+### The Big Picture (Connecting the Dots)
+
+Before Day 7, the application had one workflow:
+> You pick a topic → You pick a specialist → You get **one** answer.
+
+Every answer came from the same model settings. You were treating the AI as a black box.
+
+On Day 7, we move from a **"Single Result"** app to a **"Parallel Comparison"** app.
+> You pick a topic → The app fires **three** requests simultaneously → You see **three** answers side by side.
+
+---
+
+### What the Difference Will Be After Day 7
+
+| Before Day 7 | After Day 7 |
+|---|---|
+| One answer per topic | Three answers per topic |
+| Settings are fixed and hidden | Settings are explicit and visible |
+| You trust the AI | You understand the AI |
+| One mode (Explain/Quiz/etc.) | Plus a "Strategy Lab" mode |
+
+The most important difference: **you will see with your own eyes that the exact same question produces wildly different answers based only on Temperature and Top-P.** This proves that "the answer" is not a fact — it is a *setting*.
+
+---
+
+### The Day 7 Workflow (Step by Step)
+
+**Step 1 — User picks topic + chooses "Strategy Lab" (option 4)**
+The router in `index.js` catches `choice === '4'` and calls `compareStrategies(topic)`.
+
+**Step 2 — `compareStrategies(topic)` builds one prompt**
+It calls `buildComparePrompt(topic)` from `promptBuilder.js`. This is the same question sent to all three strategies. We don't change the question — we only change the configuration.
+
+**Step 3 — Three calls fire at the same time using `Promise.all()`**
+```javascript
+const [greedy, sampling, diverse] = await Promise.all([
+    generateContent({ prompt, config: { temperature: 0.1, topP: 1.0 } }),
+    generateContent({ prompt, config: { temperature: 0.8, topP: 0.9 } }),
+    generateContent({ prompt, config: { temperature: 1.0, topP: 0.7 } }),
+]);
+```
+All three API calls go out at the same millisecond. The app waits for all three to come back.
+
+**Step 4 — Print labeled comparison**
+All three results are printed clearly in the terminal so you can compare them side by side.
+
+---
+
+### Why This Is Important
+
+This exercise teaches you three real-world engineering skills:
+
+1. **Configuration Literacy:** You learn to read a response and ask "was this Greedy or Sampling?" After Day 7, you will instinctively know which setting caused which kind of answer.
+
+2. **Parallel Async Programming:** `Promise.all()` is one of the most used patterns in professional JavaScript. It appears in every real-world application — from loading multiple API responses at once to running parallel database queries.
+
+3. **AI Product Design:** Every AI-powered product makes these trade-offs. A legal document analyzer must use low temperature (safe, factual). A creative writing tool must use high temperature (varied, expressive). Day 7 gives you the live proof for why.
+
+---
+
+### The Three Personality Configurations
+
+| Label | Temperature | Top-P | What to Expect |
+|---|---|---|---|
+| 🤖 Greedy (The Robot) | 0.1 | 1.0 | Short, safe, textbook-accurate. Reads like a dictionary. |
+| 🧑 Sampling (The Human) | 0.8 | 0.9 | Natural, flowing, conversational. Reads like a tutor talking. |
+| 🎨 Diverse (The Creative) | 1.0 | 0.7 | Unexpected vocabulary, metaphors, analogies. Reads like a writer. |
+
+---
+
+### 🚧 Day 7 Bug Log: "No content generated" in Strategy Lab
+
+**Type:** Property Access on a String (Type Mismatch)
+
+**What we saw:**
+```
+============================================================
+🤖 Strategy: GREEDY (DETERMINISTIC)
+============================================================
+
+❌ No content generated.
+```
+*(This happened for all three strategies).*
+
+**Why it happened:**
+In `strategies.js`, the print function checked for `content.text`:
+```javascript
+if (content && content.text) {
+    console.log(content.text);
+}
+```
+However, in our custom `geminiClient.js`, the `generateContent()` function was already doing the work of extracting the text and returning it directly. Therefore, `content` was simply a regular string (e.g., `"To make tea..."`). 
+Because a plain string in JavaScript doesn't have a `.text` property, `content.text` evaluated to `undefined`, triggering the `else` block and printing the error.
+
+**How we fixed it:**
+We updated the `printSection` function to expect a raw string, not an object:
+```javascript
+if (content) {
+    console.log(content);
+}
+```
+
+**Lesson:**
+Always remember what your own helper functions return! If you build a wrapper (like `geminiClient.js`) that extracts the data for you, you don't need to extract it again in the components that use it.
+
+---
+
+*Last updated: 2026-04-27. This file grows as the project grows.*
