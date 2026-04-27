@@ -1488,3 +1488,233 @@ those braces, it does not exist.
 ---
 
 *Last updated: 2026-04-26. This file grows as the project grows.*
+
+---
+
+## Week 2 — Strategies + Chain of Thought (CoT)
+
+Week 1 was about **"What to ask"** (Prompt Engineering). Week 2 is about **"How the AI thinks"** — the mechanical process the model uses to generate each word. Understanding this transforms you from a user of the API into an engineer who can control the quality, style, and creativity of every response.
+
+---
+
+## Day 6 — Generation Strategies: The Theory
+
+### What Day 6 Was About
+
+Day 6 had one goal: understand the **three generation mentalities** before writing a single line of code. These are not abstract academic concepts — they are the exact settings you can tune in the `generationConfig` object you already use in `geminiClient.js`.
+
+---
+
+### The Core Concept: Next Token Prediction
+
+An LLM does not write a sentence all at once. It predicts the next word (called a "token") one step at a time. For every step, the model looks at every word in its vocabulary and assigns a **probability score** to each one.
+
+For example, after the prompt "The cat sat on the..." the model might compute:
+- **mat:** 80%
+- **floor:** 10%
+- **pizza:** 2%
+- **table:** 1%
+- *(everything else):* remaining %
+
+The **generation strategy** is the rule we use to pick which word actually gets printed.
+
+---
+
+### The Three Controls
+
+#### Temperature — The "Randomness Knob"
+Once a shortlist of words has been decided, Temperature controls how boldly the AI picks from it.
+
+- **Temperature = 0 (or near 0):** The AI always picks the #1 most likely word. Safe, grounded, deterministic. Use this for facts, formulas, code.
+- **Temperature = 0.5:** A balanced middle ground. Sensible but not boring.
+- **Temperature > 0.5:** The AI gives lower-ranked words a real chance of being chosen. This produces creative, varied, sometimes surprising output.
+- **Temperature = 1.0+:** Very high randomness. Use with caution — the AI can produce poetic but also incoherent results.
+
+**In code:**
+```javascript
+generationConfig: { temperature: 0.8 }
+```
+
+---
+
+#### Top-K — The "Shortlist" Filter
+Before Temperature even kicks in, Top-K **removes most words from consideration**.
+
+- If **K = 5**, the AI looks at its vocabulary of 100,000+ words and **discards everything except the top 5** most likely options. Temperature then picks from those 5.
+- **Purpose:** Prevents completely insane or "hallucinated" word choices.
+- **K = 1** is exactly Greedy Search — only one option, no randomness possible.
+
+**In code:**
+```javascript
+generationConfig: { topK: 40 }
+```
+
+---
+
+#### Top-P (Nucleus Sampling) — The "Confidence" Filter
+Top-P is a smarter, dynamic version of Top-K. Instead of a fixed number, it keeps adding words to the shortlist until their combined probability reaches **P%**.
+
+- If **P = 0.9 (90%)** and the word "Water" alone is already 91% likely, only "Water" is in the shortlist.
+- But if 100 words each have a 1% chance, Top-P adds all 90 of them (until it reaches 90%).
+- **Purpose:** The shortlist grows when the AI is unsure and shrinks when it is confident. This is more adaptive than a fixed K.
+
+**In code:**
+```javascript
+generationConfig: { topP: 0.95 }
+```
+
+---
+
+### The Three Strategies
+
+#### 1. Greedy (The Strict Robot)
+**Rule:** Always pick the single word with the highest probability. No randomness.
+
+- **Temperature:** 0 (or ~0.1)
+- **TopP:** 1.0 (no filtering needed, we always take #1)
+- **Result:** Very fast and logical but can repeat itself or sound robotic.
+
+**Example prompt:** *"The sunrise over the city was..."*
+**Greedy output:** `"beautiful."` — short, safe, predictable.
+
+---
+
+#### 2. Sampling (The Creative Artist)
+**Rule:** Use Temperature, Top-K, and Top-P together to introduce controlled randomness.
+
+- **Temperature:** 0.8–0.9
+- **TopP:** 0.9
+- **Result:** Varied, human-sounding, creative. The same prompt gives different results every time.
+
+**Example prompt:** *"The sunrise over the city was..."*
+**Sampling output:** `"spectacular, painting the skyline in molten gold as the trains sighed beneath."` — rich, alive, surprising.
+
+---
+
+#### 3. Beam Search (The Chess Player)
+**Rule:** Don't just look at the next word — keep 3 different "paths" (beams) open and compare which complete sentence turns out best.
+
+- **Gemini API:** Does not expose Beam Search directly.
+- **How we simulate it:** We make 3 parallel API calls and then use a "quality referee" (a heuristic like picking the longest, most detailed response) to choose the winner.
+- **Result:** High-quality, polished text that feels well-planned.
+
+**Example prompt:** *"The sunrise over the city was..."*
+**Beam Search (3 candidates):**
+1. `"breathtaking."`
+2. `"a quiet revelation."`
+3. `"a warm, blazing spectacle."`
+
+The referee picks #3 — the most detailed and descriptive one.
+
+---
+
+### Why This Matters for Our Project
+
+| Situation | Best Strategy | Why |
+|---|---|---|
+| Student asks for a Math formula | Greedy (Temp ~0) | Don't want creative math |
+| Student asks for a story to remember history | Sampling (Temp 0.8) | Creative language helps memory |
+| Student asks for a "best explanation" | Beam Simulation | Quality over diversity |
+
+---
+
+### Day 6 Status: ✅ Theory Complete
+
+Day 6 goal was "understand these strategies mentally." That goal is complete. No code was written — this was intentionally a reading and understanding day. The code implementation begins in Day 7.
+
+---
+
+| New Term | Meaning |
+|---|---|
+| Token | A single word or word-piece the model predicts one step at a time |
+| Temperature | Controls randomness. Low = safe and focused. High = creative and varied |
+| Top-K | Limits the word pool to the K most likely candidates before picking |
+| Top-P | Dynamically limits the word pool until cumulative probability reaches P |
+| Greedy Search | Always pick the #1 most likely next token — deterministic and fast |
+| Sampling | Pick randomly from the Top-K/Top-P shortlist — creative and varied |
+| Beam Search | Run multiple "paths" in parallel and pick the best complete sentence |
+| Nucleus Sampling | Another name for Top-P sampling |
+| Heuristic | A practical "good enough" rule used to make a decision (e.g., pick the longest response) |
+| Promise.all() | A JavaScript tool to run multiple async tasks at the same time |
+
+---
+
+## Day 7 — Strategies Module: The Implementation Plan
+
+### What Day 7 Is About
+
+Day 6 was theory. Day 7 is action. We will create `src/strategies.js` — a new specialist that runs the same prompt through all three strategies at the same time and displays the results side by side.
+
+### File to Create: `src/strategies.js`
+
+**Function:** `compareStrategies(topic)`
+
+This function will:
+1. Build one single prompt for the given topic.
+2. Fire three separate `generateContent` calls simultaneously using `Promise.all()`.
+3. Each call uses a different `generationConfig` (Greedy, Sampling, Diverse).
+4. Print all three responses labeled and side by side in the terminal.
+
+---
+
+### The Three Configurations
+
+| Strategy | Temperature | TopP | Personality |
+|---|---|---|---|
+| Strategy 1 — Greedy | 0.1 | 1.0 | Grounded, factual, no risk |
+| Strategy 2 — Sampling | 0.8 | 0.9 | Creative, balanced, human |
+| Strategy 3 — Diverse | 1.0 | 0.7 | Very diverse, wide vocabulary |
+
+---
+
+### New Concept: `Promise.all()`
+
+**The problem it solves:** If we call Strategy 1, wait for it, then call Strategy 2, wait, then call Strategy 3 — the user waits 3× longer than necessary.
+
+**What `Promise.all()` does:** It fires all three calls at the exact same moment and waits for all of them to finish together. The total wait time is the same as the slowest single call, not the sum of all three.
+
+**Mental model:**
+- Without `Promise.all()`: Like sending three letters by post, one at a time.
+- With `Promise.all()`: Like sending all three letters in the same post-box drop.
+
+```javascript
+// Instead of this (slow — sequential):
+const r1 = await call1();
+const r2 = await call2();
+const r3 = await call3();
+
+// We do this (fast — parallel):
+const [r1, r2, r3] = await Promise.all([call1(), call2(), call3()]);
+```
+
+---
+
+### Router Update Plan
+
+A new option will be added to the `index.js` menu:
+
+```
+Choose an action:
+ 1. Explain
+ 2. Compare
+ 3. Quiz
+ 4. Strategy Comparison   ← NEW
+ Choice:
+```
+
+When the user picks 4, it will call `compareStrategies(topic)` from `strategies.js`.
+
+---
+
+### Day 7 Checklist
+
+- [ ] Create `src/strategies.js`
+- [ ] Write `compareStrategies(topic)` function
+- [ ] Define 3 config objects (Greedy, Sampling, Diverse)
+- [ ] Use `Promise.all()` to run all 3 calls in parallel
+- [ ] Format and print labeled comparison output
+- [ ] Update `index.js` router to add option 4
+
+---
+
+*Last updated: 2026-04-27. This file grows as the project grows.*

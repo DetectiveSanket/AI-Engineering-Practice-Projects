@@ -2,7 +2,7 @@ import * as readline from 'node:readline/promises';
 import { stdin as input, stdout as output } from 'node:process'; 
 import { runExplainFlow } from './src/explain.js';
 import {runParamExperiment} from './src/params.js';
-import { generateQuiz, runQuizFlow } from './src/quiz.js';
+import { runQuizFlow } from './src/quiz.js';
 
 
 const rl = readline.createInterface({ input, output });
@@ -59,34 +59,16 @@ rl.on("close", () => {
 
 
 /* 
-    new task:
-    ├── explain.js         ← plain-text explanation flow - done
-    ├── quiz.js            ← JSON-forced quiz generation - done
-    ├── params.js          ← parameter experiment runner
 
+      ## Day 7 — Strategies module (S5, strategies.js)
+    Goal: Run same prompt through multiple strategies and compare.
 
-    ### Day 5 — Quiz generator with JSON parsing (S4, quiz.js)
-        Goal: Force structured output and parse it reliably.
-
-        Tasks:
-        - [ ] Write quiz.js — function generateQuiz(topic)
-        - [ ] Call Gemini with buildQuizPrompt(topic)
-        - [ ] Parse the JSON response safely:
-        - Strip markdown fences if present (```json ... ```)
-        - JSON.parse() inside try/catch
-        - If parse fails: retry once with a stricter prompt
-        - [ ] Display: question, A/B/C/D options, wait for user input, reveal answer
-        - [ ] Add "quiz" command to CLI: type "quiz sorting algorithms"
-
-        Key problem you will hit: Gemini sometimes wraps JSON in ```json fences even when told not to.
-        Fix: response.replace(/```json|```/g, "").trim() before parsing.
-
-        Definition of done: You can take a working quiz on any topic.
-
-    > The Game Loop: Instead of just printing the whole quiz at once, we will build a loop in quiz.js that:
-        Prints one question at a time.
-        Wait for you to type A, B, C, or D.
-        Tells you immediately if you are Right or Wrong.
-        Moves to the next question.
-
+    Tasks:
+    - [ ] Write strategies.js — function compareStrategies(topic)
+    - [ ] Strategy 1 (greedy simulation): temperature: 0.1, topP: 1.0
+    - [ ] Strategy 2 (sampling): temperature: 0.8, topP: 0.9
+    - [ ] Strategy 3 (diverse): temperature: 1.0, topP: 0.7
+    - [ ] Run all 3 in parallel using Promise.all()
+    - [ ] Print labeled comparison
+    - [ ] Add "strategies" command to CLI  
 */
