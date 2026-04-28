@@ -85,3 +85,20 @@ export function buildComparePrompt(topic){
 
     return prompt;
 };
+
+// 5. buildVerbalizedPrompt(topic) - for stragtegies module
+export function buildVerbalizedPrompt(topic){
+
+    const prompt = {
+        system: `
+            You are a helpful study assistant. 
+            Brainstorm 3 different ways to explain ${topic}. Evaluate which one is clearest, and then write that one.
+        `,
+
+        message: `
+            Topic: ${topic}
+        `
+    };
+
+    return prompt;
+};

@@ -1,6 +1,6 @@
 
 import { generateContent } from './geminiClient.js';
-import { buildComparePrompt } from './promptBuilder.js'
+import { buildComparePrompt , buildCoTPrompt , buildVerbalizedPrompt} from './promptBuilder.js'
 
 // The three congig object
 // greedyConfig   → temperature: 0.1, topP: 1.0
@@ -13,44 +13,49 @@ const samplingConfig = { temperature : 0.8 , topP : 0.9 }; // Balanced answer
 
 const diverseConfig = { temperature : 1.0 , topP : 0.7 }; // most creative answer   
 
-export async function compareStrategies(topic) {
+export async function compareStrategies(topic) { // export async function to compare the strategies
     
-    console.log(`🔍 Running strategies for topic: ${topic}`);
-    console.log("-".repeat(40));
+    console.log(`🔍 Running strategies for topic: ${topic}`); // logging the topic
+    console.log("-".repeat(40)); // making a line of hyphens for visual purposes eg- (------)
 
-    const prompt = buildComparePrompt(topic);
+    // COT:-
+    const cotPrompt = buildCoTPrompt(topic); // building the cot prompt
+
+    const prompt = buildComparePrompt(topic); // building the prompt
+
+    const verbalizedPrompt = buildVerbalizedPrompt(topic);
 
     // 🔥 Fire all three requests in parallel
-    const [greedy, sampling, diverse] = await Promise.all([
-        generateContent({ prompt, config: greedyConfig }),
-        generateContent({ prompt, config: samplingConfig }),
-        generateContent({ prompt, config: diverseConfig }),
-    ]);
+    const [greedy, sampling, diverse , cot , verbalized] = await Promise.all([
+        generateContent({ prompt, config: greedyConfig }), // calling the API for greedy config
+        generateContent({ prompt, config: samplingConfig }), // calling the API for sampling config
+        generateContent({ prompt, config: diverseConfig }), // calling the API for diverse config
+        generateContent({ prompt : cotPrompt}),
+        generateContent({prompt: verbalizedPrompt})
 
-    // 🔥 🔥 🔥 🔥 🔥 Print the result each with --- seperting 
-    // 🔥 🔥 🔥 🔥 🔥 🔥 🔥 🔥 🔥 🔥 🔥 🔥 🔥 🔥 
+    ]);
 
     const printSection = (label, content) => {
 
-        console.log(`\n${"=".repeat(60)}`);
-        console.log(`🤖 Strategy: ${label.toUpperCase()}`);
-        console.log(`${"=".repeat(60)}\n`);
+        console.log(`\n${"=".repeat(60)}`); // making a line of equals for visual purposes eg- (==========)
+        console.log(`🤖 Strategy: ${label.toUpperCase()}`); // logging the strategy name in uppercase
+        console.log(`${"=".repeat(60)}\n`); // making a line of equals for visual purposes eg- (==========)
 
-        if (content) {
-            console.log(content);
+        if (content) { // if content is generated
+            console.log(content); // logging the content
         } else {
-            console.log("❌ No content generated.");
+            console.log("❌ No content generated."); // logging the error message
         }
     };
 
-    printSection("Greedy (Deterministic)", greedy);
-    console.log('🔥 🔥 🔥 🔥 🔥 🔥 🔥 🔥 🔥 🔥 🔥 🔥 🔥 🔥');
+    printSection("🤖 Greedy (Deterministic)", greedy);
+
+    printSection("🤖 Sampling (Balanced)", sampling);
+
+    printSection("🤖 Diverse (Creative)", diverse);
     
-    printSection("Sampling (Balanced)", sampling);
-    console.log('🔥 🔥 🔥 🔥 🔥 🔥 🔥 🔥 🔥 🔥 🔥 🔥 🔥 🔥');
+    printSection("🧠 Chain-of-Thought (CoT)", cot);
 
-    printSection("Diverse (Creative)", diverse);
-}
+    printSection("🧠 Verbalized Sampling", verbalized);
 
-
-
+};

@@ -25,11 +25,7 @@ async function run() {
         //3. check the user choice for answer;
         const choice = await rl.question("Choose an action: \n 1. Explain \n 2. Compare \n 3. Quiz \n 4. Strategy Lab \n Choice: ");
 
-        // 4. Delegate to Specialists (The Router)
         try {
-
-            // await runExplainFlow(userInput);
-            // await runParamExperiment(userInput);
 
             // if user wants to compare: 
             if (choice === '2') {
@@ -66,15 +62,16 @@ rl.on("close", () => {
 
 /* 
 
-      ## Day 7 — Strategies module (S5, strategies.js)
-    Goal: Run same prompt through multiple strategies and compare.
+      ## Day 8 — Chain-of-thought (S5 continued)
+        > Goal: Make the model reason out loud before answering.
 
-    Tasks:
-    - [ ] Write strategies.js — function compareStrategies(topic)
-    - [ ] Strategy 1 (greedy simulation): temperature: 0.1, topP: 1.0
-    - [ ] Strategy 2 (sampling): temperature: 0.8, topP: 0.9
-    - [ ] Strategy 3 (diverse): temperature: 1.0, topP: 0.7
-    - [ ] Run all 3 in parallel using Promise.all()
-    - [ ] Print labeled comparison
-    - [ ] Add "strategies" command to CLI  
+        Tasks:
+        - [ ] Add buildCoTPrompt to promptBuilder.js (already done day 3) -- all ready done.
+        - [ ] In strategies.js, add a 4th comparison: CoT vs non-CoT on same topic
+        - [ ] Log: which gives a more accurate explanation? Write your observation as a comment in code.
+        - [ ] Try verbalized sampling: ask the model "What are 3 ways you could explain [topic]? Pick the best one and write it."
+
+        Definition of done: You have a written observation (even just a code comment) on when CoT helps vs hurts.
+
+        
 */

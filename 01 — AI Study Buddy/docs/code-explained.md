@@ -1826,3 +1826,143 @@ Always remember what your own helper functions return! If you build a wrapper (l
 ---
 
 *Last updated: 2026-04-27. This file grows as the project grows.*
+
+---
+
+## Day 8 — Chain-of-Thought (CoT): Reasoning Out Loud
+
+### What Day 8 Was About
+
+Day 7 taught us how to control the AI's **style** (Temperature, Top-P). Day 8 teaches us how to control the AI's **reasoning process** — forcing it to think step-by-step before committing to an answer.
+
+---
+
+### The Core Problem: "Eager Prediction"
+
+An LLM is a "Next Token Predictor." Without guidance, it is so eager to predict the next word that it sometimes "jumps to conclusions" before properly reasoning through the logic. This is why AI sometimes gets facts wrong or makes logical errors — it answered before it fully "thought."
+
+**Chain-of-Thought (CoT)** solves this by forcing the AI to write its reasoning out loud before giving the final answer. This gives it more "thinking space."
+
+---
+
+### Why This Matters
+
+| Without CoT | With CoT |
+|---|---|
+| AI jumps straight to the answer | AI shows its reasoning first |
+| Higher chance of hallucination | Lower chance of hallucination |
+| Output is short and final | Output is longer but traceable |
+| Like a student guessing | Like a student showing their work |
+
+**Real-world use cases:**
+- **Math tutors:** Need to show working, not just the answer.
+- **Code review tools:** Need to explain *why* something is wrong.
+- **Medical/legal AI:** Need to show reasoning for every conclusion.
+
+---
+
+### What We Built on Day 8
+
+We extended the **Strategy Lab** (`strategies.js`) with two new reasoning modes, for a total of 5 parallel strategies:
+
+| # | Strategy | Prompt Used | Config |
+|---|---|---|---|
+| 1 | 🤖 Greedy (Deterministic) | `buildComparePrompt` | temp: 0.1, topP: 1.0 |
+| 2 | 🤖 Sampling (Balanced) | `buildComparePrompt` | temp: 0.8, topP: 0.9 |
+| 3 | 🤖 Diverse (Creative) | `buildComparePrompt` | temp: 1.0, topP: 0.7 |
+| 4 | 🧠 Chain-of-Thought | `buildCoTPrompt` | default config |
+| 5 | 🧠 Verbalized Sampling | `buildVerbalizedPrompt` | default config |
+
+All 5 fire in parallel using a single `Promise.all()` call.
+
+---
+
+### File Changes Made on Day 8
+
+#### `src/promptBuilder.js` — New Function Added
+
+**`buildVerbalizedPrompt(topic)`**
+
+This is the "Verbalized Sampling" technique. Instead of asking for an answer directly, we ask the AI to brainstorm 3 different explanations, evaluate which is clearest, and then write only the best one.
+
+```javascript
+export function buildVerbalizedPrompt(topic) {
+    const prompt = {
+        system: `
+            You are a helpful study assistant.
+            Brainstorm 3 different ways to explain ${topic}.
+            Evaluate which one is clearest, and then write that one.
+        `,
+        message: `Topic: ${topic}`
+    };
+    return prompt;
+}
+```
+
+**Why this is powerful:** This is a form of "self-selection." The AI is forced to consider multiple paths and then pick the best one before answering. It is a lightweight simulation of Beam Search, but done through language instead of through configuration.
+
+---
+
+#### `src/strategies.js` — Extended Promise.all
+
+The import was updated to include the two new prompt builders:
+```javascript
+import { buildComparePrompt, buildCoTPrompt, buildVerbalizedPrompt } from './promptBuilder.js'
+```
+
+Two new prompts are built before the `Promise.all()` call:
+```javascript
+const cotPrompt = buildCoTPrompt(topic);
+const verbalizedPrompt = buildVerbalizedPrompt(topic);
+```
+
+The `Promise.all()` was extended from 3 calls to 5:
+```javascript
+const [greedy, sampling, diverse, cot, verbalized] = await Promise.all([
+    generateContent({ prompt, config: greedyConfig }),
+    generateContent({ prompt, config: samplingConfig }),
+    generateContent({ prompt, config: diverseConfig }),
+    generateContent({ prompt: cotPrompt }),
+    generateContent({ prompt: verbalizedPrompt })
+]);
+```
+
+Two new print sections were added:
+```javascript
+printSection("🧠 Chain-of-Thought (CoT)", cot);
+printSection("🧠 Verbalized Sampling", verbalized);
+```
+
+---
+
+### Key Observation: When CoT Helps vs Hurts
+
+| Situation | CoT Helps? | Why |
+|---|---|---|
+| Complex multi-step problems | ✅ Yes | Forces the model to not skip steps |
+| Simple factual questions | ❌ No | Adds length with no benefit |
+| Creative writing tasks | ❌ No | The reasoning breaks the creative flow |
+| Debugging or logic problems | ✅ Yes | Traces the error through visible reasoning |
+| Summarisation tasks | ❌ No | The summary IS the answer — no reasoning needed |
+
+**Rule of thumb:** If you would expect a human expert to "show their working," use CoT. If you would expect a human to just know the answer, skip it.
+
+---
+
+### Day 8 Status: ✅ Complete
+
+All 5 strategies are running in parallel. The Strategy Lab now demonstrates the full spectrum from "Fast and Focused" (Greedy) to "Slow and Thoughtful" (Chain-of-Thought).
+
+---
+
+| New Term | Meaning |
+|---|---|
+| Chain-of-Thought (CoT) | Prompting the AI to write its reasoning before its final answer |
+| Verbalized Sampling | Asking the AI to brainstorm multiple paths and self-select the best one |
+| Eager Prediction | When an LLM answers too quickly without reasoning, causing hallucinations |
+| Self-Selection | The model evaluating its own candidate outputs and picking the best |
+| Reasoning Space | The "room" in the output for the AI to work through logic before concluding |
+
+---
+
+*Last updated: 2026-04-28. This file grows as the project grows.*
