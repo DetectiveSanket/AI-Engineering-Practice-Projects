@@ -1966,3 +1966,284 @@ All 5 strategies are running in parallel. The Strategy Lab now demonstrates the 
 ---
 
 *Last updated: 2026-04-28. This file grows as the project grows.*
+
+---
+
+## Day 9 — Session Memory: Giving the App a Short-Term Brain
+
+### What Day 9 Was About
+
+Every previous day, the app was **stateless** — it had no memory of what the user had asked before. Each topic was treated as if it were the first question ever. Day 9 changes that by introducing an in-process session store that lives as long as the program is running.
+
+---
+
+### Why We Created `src/memory.js`
+
+In real-world AI assistants (ChatGPT, Gemini, etc.), conversation context is stored and passed back to the model with every message. Our `memory.js` is a beginner version of that idea — a simple JavaScript object that tracks what topics have been studied so the app can:
+
+- Show the user their study history (`history` command)
+- Warn the user when they repeat a topic
+- Track how many questions were asked in the session
+
+We did **not** use Redis, a database, or any external storage. This is intentional. Session memory that vanishes when the program closes is the correct design for a single-session CLI tool.
+
+---
+
+## File: `src/memory.js` — Line by Line
+
+### The Session Store
+
+```javascript
+const session = {
+    topic: [],
+    lastTopic: null,
+    questionCount: 0
+};
+```
+
+This is the "notepad" of the app. It is a plain JavaScript object — not exported, not visible outside this file. Only the functions below can read or change it.
+
+- **`topic: []`** — An array that stores every topic the user has studied. Each item is an object: `{ topic: "...", timestamp: ... }`.
+- **`lastTopic: null`** — A shortcut to the most recent topic without scanning the whole array.
+- **`questionCount: 0`** — A counter that increments by 1 every time a topic is added.
+
+---
+
+### `addTopic(topic)` — Writing to Memory
+
+```javascript
+export function addTopic(topic) {
+    session.topic.push({
+        topic: topic,
+        timestamp: Date.now()
+    });
+    session.lastTopic = topic;
+    session.questionCount += 1;
+}
+```
+
+**What it does:** Adds a new entry to the `session.topic` array. Each entry is an object with:
+- `topic` — the actual string the user typed.
+- `timestamp` — the exact millisecond it was added (`Date.now()` returns a Unix timestamp in milliseconds).
+
+**Why we store objects instead of plain strings:** Storing `{ topic, timestamp }` gives us the option to display "when" topics were studied later. A plain string `"Java"` only tells us what, not when.
+
+**Why called in `index.js` after the try-catch:**
+```javascript
+if (!hasTopic(userInput)) {
+    addTopic(userInput);
+}
+```
+The `!hasTopic` guard prevents the same topic from being added to the list twice if the user chooses `y` (different angle) on the repeat warning.
+
+---
+
+### `getHistory()` — Reading Memory
+
+```javascript
+export function getHistory() {
+    return session.topic;
+    // Returns: [ { topic: "Java", timestamp: 173... }, ... ]
+    // This is an ARRAY OF OBJECTS.
+
+    // VERSION B (alternative — commented out):
+    // return session.topic.map(t => t.topic);
+    // Returns: [ "Java", "Python" ]
+    // This is a plain ARRAY OF STRINGS.
+}
+```
+
+**Version A (kept):** Returns the full array of objects. Used with `t.topic` to display each name in `index.js`.
+
+**Version B (commented out):** Returns only the string names. Simpler for display, but loses the timestamp data.
+
+Both are correct. Version A is better here because `index.js` uses `t.topic` in its `forEach` — which only works when items are objects.
+
+---
+
+### `clearSession()` — Wiping Memory
+
+```javascript
+export function clearSession() {
+    session.topic = [];
+    session.lastTopic = null;
+    session.questionCount = 0;
+}
+```
+
+Resets the notepad back to its starting blank state. Used when the user types `"reset"` in the CLI.
+
+**Important:** We do NOT need this on `exit`. When the program ends, Node.js automatically destroys all in-memory variables. `clearSession` is only useful if you want to wipe history **without** closing the app — which is exactly what the `reset` command does.
+
+---
+
+### `hasTopic(topic)` — Checking Without Changing
+
+```javascript
+export function hasTopic(topic) {
+    return session.topic.some(t => t.topic.toLowerCase() === topic.toLowerCase());
+}
+```
+
+**What `.some()` does:** It loops through every item in the array and returns `true` the moment it finds one match. If no match is found, it returns `false`.
+
+**Why `.toLowerCase()` on both sides:** So `"Java"` and `"java"` and `"JAVA"` all count as the same topic. Case-insensitive comparison.
+
+**Why a separate function instead of doing it inline in `index.js`:** Keeps `index.js` clean. The question "does this topic exist?" is a memory concern, not a routing concern. It belongs in `memory.js`.
+
+---
+
+## Changes in `index.js` — Day 9
+
+### The Import Line
+
+```javascript
+import { addTopic, getHistory, clearSession, hasTopic } from './src/memory.js';
+```
+
+Four functions imported. This is the full public interface of `memory.js`.
+
+---
+
+### The `reset` Command
+
+```javascript
+if (userInput === 'reset') {
+    clearSession();
+    console.log("✅ Session reset. Start fresh.");
+    continue;
+}
+```
+
+Wipes all memory and continues the loop from the top. The `continue` here means: skip the rest of this loop iteration (do not ask for a choice) and go back to asking for a new topic.
+
+---
+
+### The `history` Command
+
+```javascript
+if (userInput === 'history') {
+    const history = getHistory();
+
+    if (history.length === 0) {
+        console.log("⚠️  No history found.");
+        continue;
+    }
+
+    console.log("📚 You've asked about these topics:");
+    history.forEach((t, i) => {
+        console.log(`${i + 1}. ${t.topic}`);
+    });
+
+    continue;
+}
+```
+
+**Why `continue` at the end?** Without it, the code would fall through to the `rl.question` for choosing Explain/Quiz/etc. — which makes no sense after printing a history list. `continue` jumps back to the top of the `while(true)` loop to ask for the next topic.
+
+**Why the empty history check?** If the user types `history` before asking anything, `session.topic` is an empty array. The `forEach` would print nothing and look broken. The check catches this and prints a clear message instead.
+
+---
+
+### The Repeat Detection
+
+```javascript
+if (hasTopic(userInput)) {
+    const ans = await rl.question(`⚠️  You asked about "${userInput}" before. Want a different angle? (y/n): `);
+
+    if (ans.toLowerCase() === 'n') {
+        continue;   // go back to ask for a new topic
+    }
+    // if 'y' — do nothing. fall through to the choice menu below.
+}
+```
+
+**The flow:**
+1. User types a topic.
+2. `hasTopic` checks if it is already in memory.
+3. If yes → ask `y/n`.
+4. If `n` → `continue` (jump back to top of loop, ask for a new topic).
+5. If `y` → do nothing (no `else` needed). The code naturally falls down to the `rl.question` for choosing Explain/Quiz/etc.
+
+This is an example of "falling through" — when you want the `yes` path to do nothing special, you just let the code continue running naturally below the `if` block.
+
+---
+
+### The `addTopic` Call
+
+```javascript
+if (!hasTopic(userInput)) {
+    addTopic(userInput);
+}
+```
+
+Placed **after** the `try/catch` block, outside all the `if/else` branches. This means it runs once after every successful specialist call — regardless of whether the user chose Explain, Quiz, or Strategy Lab.
+
+The `!hasTopic` guard means: only add to memory if it is a new topic. If the user said `y` to "different angle," the topic is already in memory and should not be added again.
+
+**No `await` needed** because `addTopic` is synchronous — it just writes to a plain object, no API calls.
+
+---
+
+### Day 9 Status: ✅ Complete
+
+The app now has a functional short-term memory. The full CLI command set is:
+
+| Command | What it does |
+|---|---|
+| `exit` | Closes the app |
+| `history` | Shows all topics studied this session |
+| `reset` | Clears all session memory and starts fresh |
+| *(any topic)* | Runs the specialist menu |
+
+---
+
+### Day 9 Bug Log
+
+**Bug 1 — Typo in variable name**
+
+```javascript
+// ❌ Wrong — "userInpust" does not exist
+if (userInpust.includes(t.topic) > 0) { ... }
+
+// ✅ Fixed — use hasTopic() with correct variable name
+if (hasTopic(userInput)) { ... }
+```
+
+**Bug 2 — Wrong logic for repeat detection**
+
+The original attempt used `.includes()` on the string `userInput` itself (checking if a string contains a substring) rather than checking the memory array. The correct tool is `hasTopic()` which uses `.some()` on the array.
+
+**Bug 3 — `await` on a synchronous function**
+
+```javascript
+// ❌ Wrong — clearSession is not async
+await clearSession();
+
+// ✅ Fixed — no await needed
+clearSession();
+```
+
+`await` should only be used on functions that return a Promise (functions that call an API, read a file, or wait for something). `clearSession` just modifies an object — it returns nothing and finishes instantly.
+
+**Bug 4 — `hasTopic` not defined at first**
+
+The function was used in `index.js` before it existed in `memory.js`. Fix: add `hasTopic` to `memory.js` first, then add it to the import line in `index.js`.
+
+---
+
+| New Term | Meaning |
+|---|---|
+| Session Memory | Data that lives in RAM only while the program is running |
+| Stateless | An app with no memory of previous interactions |
+| `.some()` | Array method — returns `true` if at least one item passes the test |
+| `.map()` | Array method — transforms each item and returns a new array |
+| `continue` | Loop keyword — skip the rest of this iteration and go back to the top |
+| `Date.now()` | Returns the current time in milliseconds since Jan 1, 1970 |
+| Unix Timestamp | A number representing a point in time — used for sorting and comparing dates |
+| Falling Through | When no `else` is needed because the "yes" path just continues normally |
+| Guard Clause | An early `if` check that prevents bad data from reaching the main logic |
+
+---
+
+*Last updated: 2026-04-29. This file grows as the project grows.*

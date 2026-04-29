@@ -4,6 +4,7 @@ import { runExplainFlow } from './src/explain.js';
 import {runParamExperiment} from './src/params.js';
 import { runQuizFlow } from './src/quiz.js';
 import { compareStrategies } from './src/strategies.js'
+import { addTopic, getHistory, clearSession , hasTopic} from './src/memory.js';
 
 
 const rl = readline.createInterface({ input, output });
@@ -21,6 +22,42 @@ async function run() {
             rl.close();
             break;
         }
+
+        if(userInput === 'reset') {
+            clearSession();
+            console.log("✅ Session reset. Start fresh.");
+            continue;
+        }
+
+        // 2.5 Handle history command
+        if(userInput === 'history') {
+            const history = getHistory();
+
+            if(history.length === 0){
+                console.log("⚠️  No history found.");
+                continue;
+            }
+
+            console.log("📚 You've asked about these topics:");
+            history.forEach((t, i) => {
+                console.log(`${i + 1}. ${t.topic}`);
+            })
+            
+            continue; // why continue? => to skip the further steps like choice of questions, explanation, comparison, quiz, strategies 
+        }
+
+        // 2.6 check if userInput already exists in memeory.topic[];
+        if (hasTopic(userInput)) {
+
+            const ans = await rl.question(`⚠️  You asked about "${userInput}" before. Want a different angle? (y/n): `);
+
+            if (ans.toLowerCase() === 'n') {
+                continue;   // jump back to ask for a new topic
+            }
+
+            // if 'y', do nothing — fall through to the choice menu below
+        }
+
 
         //3. check the user choice for answer;
         const choice = await rl.question("Choose an action: \n 1. Explain \n 2. Compare \n 3. Quiz \n 4. Strategy Lab \n Choice: ");
@@ -47,6 +84,11 @@ async function run() {
                 await runExplainFlow(userInput);
             }
 
+            // Add the topic if not exist already in memeory
+            if(!hasTopic(userInput)) {
+                addTopic(userInput);
+            }
+
         } catch (error) {
             console.error("❌ Main Loop Error:", error.message);
         }
@@ -59,19 +101,17 @@ rl.on("close", () => {
     process.exit(0);
 });
 
-
 /* 
+    ## Day 9 — Session memory (S6, memory.js)
 
-      ## Day 8 — Chain-of-thought (S5 continued)
-        > Goal: Make the model reason out loud before answering.
+    > Goal: The CLI remembers what topics you've asked about in this session.
 
         Tasks:
-        - [ ] Add buildCoTPrompt to promptBuilder.js (already done day 3) -- all ready done.
-        - [ ] In strategies.js, add a 4th comparison: CoT vs non-CoT on same topic
-        - [ ] Log: which gives a more accurate explanation? Write your observation as a comment in code.
-        - [ ] Try verbalized sampling: ask the model "What are 3 ways you could explain [topic]? Pick the best one and write it."
-
-        Definition of done: You have a written observation (even just a code comment) on when CoT helps vs hurts.
-
+        - [] Write memory.js — simple JS object, not Redis, not a DB
+        - [] Structure: { topics: [], lastTopic: null, questionCount: 0 }
+        - [] Functions: addTopic(topic), getHistory(), clearSession()
+        - [] Update index.js: on each input, save to memory
+        - [] Add "history" command to CLI: shows all topics asked this session
+        - [] If user types a topic they already asked: show "You asked this before. Want a different angle? (y/n)"
         
 */
