@@ -2,6 +2,8 @@
 
 import { generateContent } from './geminiClient.js';
 import { buildQuizPrompt } from './promptBuilder.js';
+import { logResponse } from './logger.js';
+
 
 export async function generateQuiz(topic) {
 
@@ -81,6 +83,7 @@ export async function runQuizFlow(topic , rl) {
         console.log(`D. ${q.options.D}`);
 
         const answer = await rl.question('\nYour answer (A-D): ');
+        // logResponse(topic , 'quiz' , buildQuizPrompt(topic) , answer);
 
         if(answer.toUpperCase() === q.answer.toUpperCase()) {
             console.log('\n✅ Correct!\n');

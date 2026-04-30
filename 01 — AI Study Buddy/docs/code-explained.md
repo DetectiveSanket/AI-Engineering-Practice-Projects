@@ -2247,3 +2247,298 @@ The function was used in `index.js` before it existed in `memory.js`. Fix: add `
 ---
 
 *Last updated: 2026-04-29. This file grows as the project grows.*
+
+---
+
+## Day 10 — The Logger: Saving Sessions to Disk
+
+### What Day 10 Was About
+
+Day 9 gave the app short-term memory — it could remember topics during a session. Day 10 gives it **long-term memory** — it saves every session permanently to a JSON file on disk so you can review what the models produced after the program closes.
+
+This is the difference between a scratchpad (RAM) and a notebook (disk).
+
+---
+
+### Why We Built `src/logger.js`
+
+Without logging, all AI responses disappear the moment the terminal closes. As an AI engineer, you need to be able to look back and ask:
+- "What did the Greedy strategy say vs the Creative strategy on this topic?"
+- "Did the model give a different answer today vs yesterday?"
+- "Which strategy produced the most useful explanation?"
+
+Logging is standard practice in every production AI system. Day 10 is your version of that.
+
+---
+
+### Why JSON Files?
+
+| Reason | Explanation |
+|---|---|
+| Human-readable | You can open any session file directly in VS Code |
+| Machine-readable | You can write a script later to parse and analyse all sessions |
+| Structured | Every file has the exact same shape — easy to compare |
+| No setup | No database, no server, no configuration required |
+
+One JSON file is created **per session.** The filename uses a Unix timestamp so files never overwrite each other:
+```
+logs/
+  session-1777526641571.json
+  session-1777527360370.json
+```
+
+---
+
+## File: `src/logger.js` — Line by Line
+
+### Imports
+
+```javascript
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+```
+
+- **`fs`** — Node.js File System module. Used to create folders and write files.
+- **`path`** — Helps build file paths safely across Windows and Mac.
+- **`fileURLToPath` + `__dirname`** — In ES Modules (`type: "module"`), the global `__dirname` variable does not exist. We recreate it manually by converting `import.meta.url` (this file's URL) into a filesystem path and taking its parent directory.
+
+---
+
+### The Log Store
+
+```javascript
+const logger = {
+    startTime: Date.now(),
+    endTime: null,
+    topics: [],
+    responses: []
+};
+```
+
+This is the internal store — not exported, not accessible outside this file. It accumulates all session data while the program runs.
+
+- **`startTime`** — Set immediately when the module loads. Records when the session began.
+- **`endTime`** — Set to `null` until `saveSession()` is called. Records when the session ended.
+- **`topics`** — A flat list of topic strings for quick scanning.
+- **`responses`** — The full record: every topic, strategy, prompt, and AI response.
+
+---
+
+### `logResponse(topic, strategy, prompt, response)`
+
+```javascript
+export function logResponse(topic, strategy, prompt, response) {
+    logger.responses.push({
+        topic: topic,
+        strategy: strategy,
+        prompt: prompt,
+        response: response
+    });
+    logger.topics.push(topic);
+}
+```
+
+Called inside each specialist after the AI responds. Pushes one complete record into `logger.responses`.
+
+**Where it is called:**
+- `explain.js` — after the AI explanation is received, strategy label: `"explanation"`
+- `params.js` — after each temperature comparison, strategy labels: `"0.1"` and `"0.9"`
+- `strategies.js` — after each of the 5 parallel calls, strategy labels: `"greedy"`, `"sampling"`, `"diverse"`, `"cot"`, `"verbalized"`
+
+---
+
+### `saveSession()`
+
+```javascript
+export function saveSession() {
+    logger.endTime = Date.now();
+
+    const logsDire = path.join(__dirname, '..', 'logs');
+
+    if (!fs.existsSync(logsDire)) {
+        fs.mkdirSync(logsDire, { recursive: true });
+    }
+
+    const filename = `session-${Date.now()}.json`;
+    const filepath = path.join(logsDire, filename);
+
+    fs.writeFileSync(filepath, JSON.stringify(logger, null, 2));
+    console.log(`📝 Session logged to: ${filepath}`);
+}
+```
+
+**Step by step:**
+1. `logger.endTime = Date.now()` — stamps the end of the session.
+2. `path.join(__dirname, '..', 'logs')` — builds the path to the `logs/` folder. `..` goes up one level from `src/` to the project root.
+3. `fs.existsSync` + `fs.mkdirSync` — checks if `logs/` exists and creates it if not. `recursive: true` means it creates any missing parent folders too.
+4. `session-${Date.now()}.json` — unique filename using the current timestamp in milliseconds.
+5. `JSON.stringify(logger, null, 2)` — converts the object to a readable JSON string. The `2` adds 2-space indentation (pretty-printing).
+6. `fs.writeFileSync` — writes the file to disk synchronously (waits until done before continuing).
+
+---
+
+## Changes Across Specialist Files
+
+### `explain.js`
+
+```javascript
+const prompt = buildExplainPrompt(topic);
+const response = await generateContent({ prompt, config: { temperature: 0.7 } });
+logResponse(topic, 'explanation', prompt, response);
+```
+
+The prompt is saved to a variable first so the same object can be passed to both `generateContent` and `logResponse`. This ensures the exact prompt that produced the response is recorded.
+
+### `params.js`
+
+```javascript
+logResponse(topic, "0.9", buildExplainPrompt(topic), responseB);
+```
+
+Only the `0.9` (creative) response is logged. The `0.1` call has `logResponse` commented out — a design choice left for future refinement.
+
+### `strategies.js`
+
+All 5 strategies are logged after their `Promise.all()` resolves:
+```javascript
+logResponse(topic, 'greedy', prompt, greedy);
+logResponse(topic, 'sampling', prompt, sampling);
+logResponse(topic, 'diverse', prompt, diverse);
+logResponse(topic, 'cot', cotPrompt, cot);
+logResponse(topic, 'verbalized', verbalizedPrompt, verbalized);
+```
+
+### `index.js`
+
+```javascript
+// On 'exit' command:
+saveSession();
+console.log("📝 Saving session to logs...");
+rl.close();
+break;
+
+// On Ctrl+C (SIGINT):
+process.on('SIGINT', () => {
+    saveSession();
+    console.log("\n📝 Session saved. Goodbye!");
+    process.exit(0);
+});
+```
+
+The session is saved whether the user types `exit` or presses `Ctrl+C`. Both paths are covered.
+
+---
+
+## The Proof: A Real Session Log
+
+This is the actual file produced in the first successful run (`session-1777527360370.json`):
+
+```json
+{
+  "startTime": 1777527302476,
+  "endTime": 1777527360370,
+  "topics": [
+    "explain C++ in very very short?",
+    "explain C++ in very very short?",
+    ...
+  ],
+  "responses": [
+    {
+      "topic": "explain C++ in very very short?",
+      "strategy": "greedy",
+      "response": "C++: A powerful, high-performance programming language..."
+    },
+    {
+      "topic": "explain C++ in very very short?",
+      "strategy": "sampling",
+      "response": "C++ is a powerful, high-performance programming language..."
+    },
+    {
+      "topic": "explain C++ in very very short?",
+      "strategy": "cot",
+      "response": "Okay, here's C++ in very, very short steps:\n1. What it is..."
+    }
+  ]
+}
+```
+
+Notice how the `greedy` response is a single bold sentence while the `cot` response is a numbered list with reasoning. This is exactly what our generation strategy theory predicted.
+
+---
+
+### Day 10 Bug Log
+
+**Bug 1 — Stray import from `express`**
+```javascript
+// ❌ Wrong — 'express' is not installed and not needed here
+import { response } from 'express';
+
+// ✅ Fix — delete this line entirely
+```
+This was an autocomplete suggestion that snuck in. It caused an immediate crash on startup.
+
+**Bug 2 — Wrong folder path using `process.cwd()`**
+```javascript
+// ❌ Wrong — cwd() returns the folder you ran node FROM, not the project folder
+const logsDire = path.join(process.cwd(), "logs");
+// Result: D:\AI Engineering Practice Projects\logs\  ← WRONG
+
+// ✅ Fix — use __dirname which is always THIS file's folder
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const logsDire = path.join(__dirname, '..', 'logs');
+// Result: D:\AI Engineering Practice Projects\01 — AI Study Buddy\logs\  ← CORRECT
+```
+
+**Bug 3 — Typo in `mkdirSync` argument**
+```javascript
+// ❌ Wrong — '.logs' is a different string, creates a hidden folder in the wrong place
+fs.mkdirSync('.logs', { recursive: true });
+
+// ✅ Fix — use the variable that holds the correct path
+fs.mkdirSync(logsDire, { recursive: true });
+```
+
+**Bug 4 — `__dirname` typo in variable name**
+```javascript
+// ❌ Wrong — typo: "__direname" (extra 'e')
+const __direname = path.dirname(fileURLToPath(import.meta.url));
+
+// ✅ Correct spelling
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+```
+
+---
+
+### Day 10 Status: ✅ Complete — Project Week 2 Finished
+
+| Day | Feature | Status |
+|---|---|---|
+| Day 6 | Generation strategy theory | ✅ |
+| Day 7 | Strategy Lab (parallel API calls) | ✅ |
+| Day 8 | Chain-of-Thought + Verbalized Sampling | ✅ |
+| Day 9 | Session Memory (history, reset, repeat detection) | ✅ |
+| Day 10 | Disk Logger (JSON session files) | ✅ |
+
+---
+
+| New Term | Meaning |
+|---|---|
+| `fs` module | Node.js built-in for reading and writing files and folders |
+| `path` module | Node.js built-in for building safe file paths across operating systems |
+| `import.meta.url` | In ES Modules, gives the URL of the current file (replaces `__filename`) |
+| `fileURLToPath` | Converts a file URL like `file:///C:/...` into a regular path string |
+| `__dirname` | The directory containing the current file — must be recreated manually in ES Modules |
+| `process.cwd()` | Returns the directory from which `node` was launched — not always the project folder |
+| `fs.existsSync` | Checks if a file or folder exists on disk — returns `true` or `false` |
+| `fs.mkdirSync` | Creates a folder synchronously. `recursive: true` creates missing parent folders too |
+| `fs.writeFileSync` | Writes a string to a file synchronously — waits until done before continuing |
+| `JSON.stringify(obj, null, 2)` | Converts a JS object to a formatted JSON string with 2-space indentation |
+| `SIGINT` | The signal sent when the user presses `Ctrl+C` — can be intercepted with `process.on` |
+| Pretty-printing | Formatting JSON with indentation so it is human-readable |
+
+---
+
+*Last updated: 2026-04-30. This file grows as the project grows.*

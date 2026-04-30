@@ -56,6 +56,8 @@
 
 import { generateContent } from './geminiClient.js';
 import { buildExplainPrompt } from './promptBuilder.js';
+import { logResponse } from './logger.js';
+
 
 /**
  * Specialist: Explanation Flow
@@ -65,8 +67,11 @@ export async function runExplainFlow(topic) {
     try {
         console.log("\n🤔 Thinking about: " + topic + "...");
 
+        const prompt = buildExplainPrompt(topic);
+
         const response = await generateContent({
-            prompt: buildExplainPrompt(topic),
+            // prompt : buildExplainPrompt(topic)
+            prompt: prompt,
             config: {
                 temperature: 0.7
             }
@@ -74,6 +79,7 @@ export async function runExplainFlow(topic) {
 
         console.log("\n🤖 ----- AI Study Buddy: ------ ");
         console.log(response);
+        logResponse(topic , 'explanation' , prompt , response);
         console.log("-------------------------------\n");
         
     } catch (error) {

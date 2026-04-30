@@ -1,6 +1,8 @@
 
 import {generateContent} from './geminiClient.js';
 import {buildExplainPrompt , buildCoTPrompt} from './promptBuilder.js'
+import { logResponse } from './logger.js';
+
 
 export async function runParamExperiment(topic) {
 
@@ -34,11 +36,13 @@ export async function runParamExperiment(topic) {
         console.log("\n🤖 ----- AI Study Buddy Answer : ------ ");
         console.log("Temperature: 0.1 (Strict/Robotic)");
         console.log(responseA);
+        // logResponse(topic , "0.1" , buildExplainPrompt(topic) , responseA);
         console.log("-------------------------------\n");
 
   
         console.log("Temperature: 0.9 (Highly Creative)");
         console.log(responseB);
+        logResponse(topic , "0.9" , buildExplainPrompt(topic) , responseB);
         console.log("-------------------------------\n");
 
 

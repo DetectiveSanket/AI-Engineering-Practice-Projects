@@ -5,9 +5,18 @@ import {runParamExperiment} from './src/params.js';
 import { runQuizFlow } from './src/quiz.js';
 import { compareStrategies } from './src/strategies.js'
 import { addTopic, getHistory, clearSession , hasTopic} from './src/memory.js';
-
+import { saveSession } from './src/logger.js'
 
 const rl = readline.createInterface({ input, output });
+
+    process.on('SIGINT' , ()=> {
+        console.log('📝 Saving session to logs...');
+        saveSession(); // here saving the session
+        console.log("📝 Session saved to logs/");
+
+        
+        process.exit(0);
+    });
 
 async function run() {
     console.log("🚀 AI Study Buddy is waking up...");
@@ -18,10 +27,16 @@ async function run() {
 
         // 2. Handle Exit
         if (userInput.toLowerCase() === 'exit') {
+            console.log('📝 Saving session to logs...');
+            saveSession(); // here saving the session
+            console.log("📝 Session saved to logs/");
+
+            
             console.log("\n👋 Closing the AI Study Buddy. See you later!");
             rl.close();
             break;
         }
+
 
         if(userInput === 'reset') {
             clearSession();
@@ -42,7 +57,7 @@ async function run() {
             history.forEach((t, i) => {
                 console.log(`${i + 1}. ${t.topic}`);
             })
-            
+
             continue; // why continue? => to skip the further steps like choice of questions, explanation, comparison, quiz, strategies 
         }
 
@@ -102,16 +117,16 @@ rl.on("close", () => {
 });
 
 /* 
-    ## Day 9 — Session memory (S6, memory.js)
+    ├── logger.js          ← writes session.json to disk
 
-    > Goal: The CLI remembers what topics you've asked about in this session.
+    ## Day 10 — Logger (S6 continued, logger.js)
+        > Goal: Save every session to disk so you can review what the model produced.
 
         Tasks:
-        - [] Write memory.js — simple JS object, not Redis, not a DB
-        - [] Structure: { topics: [], lastTopic: null, questionCount: 0 }
-        - [] Functions: addTopic(topic), getHistory(), clearSession()
-        - [] Update index.js: on each input, save to memory
-        - [] Add "history" command to CLI: shows all topics asked this session
-        - [] If user types a topic they already asked: show "You asked this before. Want a different angle? (y/n)"
-        
+        - [ ] Write logger.js — writes session data to ./logs/session-[timestamp].json
+        - [ ] Log structure: { startTime, endTime, topics, responses: [{ topic, strategy, prompt, response }] }
+        - [ ] Update index.js: on Ctrl+C, call logger before exiting
+        - [ ] Create logs/ folder with .gitignore entry
+            
 */
+
