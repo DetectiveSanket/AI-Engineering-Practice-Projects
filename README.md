@@ -40,8 +40,8 @@ Every project here is:
 
 | # | Project | Concepts Covered | Stack | Status |
 |---|---------|-----------------|-------|--------|
-| 01 | [AI Study Buddy](#-project-01--ai-study-buddy) | LLM params, generation strategies, prompt engineering, JSON output, CoT, session memory | Node.js | 🟡 In Progress |
-| 02 | [Study Buddy v2 — Stateful Tutor](#-project-02--study-buddy-v2--stateful-tutor) | Multi-turn memory, G-eval, LLM-as-judge, self-evaluation loop, component evals | Node.js | ⚪ Planned |
+| 01 | [AI Study Buddy](#-project-01--ai-study-buddy) | LLM params, generation strategies, prompt engineering, JSON output, CoT, session memory | Node.js | 🟢 Complete |
+| 02 | [Study Buddy v2 — Stateful Tutor](#-project-02--study-buddy-v2--stateful-tutor) | Multi-turn memory, G-eval, LLM-as-judge, self-evaluation loop, component evals | Node.js | 🟡 In Progress |
 | 03 | [News Research Agent](#-project-03--news-research-agent) | ReAct pattern, tool use, agent loop, agentic memory, context engineering | Node.js | ⚪ Planned |
 | 04 | [Research Agent + Knowledge Base](#-project-04--research-agent--knowledge-base) | RAG from scratch, chunking strategies, ChromaDB, HyDE, Agentic RAG | Node.js + Python | ⚪ Planned |
 | 05 | [MCP Server + Observability](#-project-05--mcp-server--observability) | MCP architecture, MCP tools/resources, LLM tracing, Opik, multi-turn evals | Python | ⚪ Planned |
