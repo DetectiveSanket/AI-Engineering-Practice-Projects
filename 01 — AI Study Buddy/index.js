@@ -21,6 +21,9 @@ const rl = readline.createInterface({ input, output });
 async function run() {
     console.log("🚀 AI Study Buddy is waking up...");
 
+    const conversationHistory = [];
+
+
     while (true) {
         // 1. Ask the user for a topic
         const userInput = await rl.question("\n📚 Enter a topic to study (or type 'exit'): ");
@@ -73,6 +76,12 @@ async function run() {
             // if 'y', do nothing — fall through to the choice menu below
         }
 
+        conversationHistory.push({
+            role:"user",
+            parts:[{
+                text:userInput
+            }]
+        });
 
         //3. check the user choice for answer;
         const choice = await rl.question("Choose an action: \n 1. Explain \n 2. Compare \n 3. Quiz \n 4. Strategy Lab \n Choice: ");
@@ -96,7 +105,13 @@ async function run() {
 
             // Default fallback: Explain
             else {
-                await runExplainFlow(userInput);
+                const aiResponse = await runExplainFlow(userInput ,conversationHistory);
+                conversationHistory.push({
+                    role:"model",
+                    parts:[{
+                        text: aiResponse
+                    }]
+                });
             }
 
             // Add the topic if not exist already in memeory
@@ -116,17 +131,5 @@ rl.on("close", () => {
     process.exit(0);
 });
 
-/* 
-    ├── logger.js          ← writes session.json to disk
 
-    ## Day 10 — Logger (S6 continued, logger.js)
-        > Goal: Save every session to disk so you can review what the model produced.
-
-        Tasks:
-        - [ ] Write logger.js — writes session data to ./logs/session-[timestamp].json
-        - [ ] Log structure: { startTime, endTime, topics, responses: [{ topic, strategy, prompt, response }] }
-        - [ ] Update index.js: on Ctrl+C, call logger before exiting
-        - [ ] Create logs/ folder with .gitignore entry
-            
-*/
 

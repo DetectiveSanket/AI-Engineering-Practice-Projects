@@ -95,8 +95,8 @@ ai-engineering-practice/
 
 **Domain:** Education / CLI tool  
 **Language:** Node.js (JavaScript)  
-**Duration:** 3 weeks  
-**Status:** 🟡 In Progress
+**Duration:** 2 weeks  
+**Status:** 🟢 Complete
 
 #### What it does
 A command-line tool where you type any technical topic and the system generates an explanation, an interactive quiz, and comparative outputs across different generation strategies. Every API call is written by hand — no wrapper libraries hiding what's happening.
@@ -148,8 +148,8 @@ A command-line tool where you type any technical topic and the system generates 
 
 **Domain:** Education / CLI tool  
 **Language:** Node.js (JavaScript)  
-**Duration:** 2 weeks  
-**Status:** ⚪ Planned
+**Duration:** 1 week  
+**Status:** 🟡 In Progress
 
 #### What it adds over Project 01
 - Full multi-turn conversation history passed to every API call

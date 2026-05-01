@@ -63,7 +63,7 @@ import { logResponse } from './logger.js';
  * Specialist: Explanation Flow
  * Responsibility: Handle the UI/UX and API call for concept explanations.
  */
-export async function runExplainFlow(topic) {
+export async function runExplainFlow(topic , history) {
     try {
         console.log("\n🤔 Thinking about: " + topic + "...");
 
@@ -74,13 +74,18 @@ export async function runExplainFlow(topic) {
             prompt: prompt,
             config: {
                 temperature: 0.7
-            }
+            },
+
+            history
         });
 
         console.log("\n🤖 ----- AI Study Buddy: ------ ");
         console.log(response);
         logResponse(topic , 'explanation' , prompt , response);
         console.log("-------------------------------\n");
+
+        
+        return response;
         
     } catch (error) {
         // We catch the error here so the 'Boss' (index.js) doesn't crash

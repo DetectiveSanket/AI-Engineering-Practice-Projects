@@ -27,7 +27,7 @@ const client = new GoogleGenAI({
  * @param {Object} options.config - Generation config (temperature, etc.)
  */
 // export async function generateContent({ model = 'gemini-3-flash-preview', prompt, config = {} }) {
-export async function generateContent({ model = 'gemini-2.5-flash', prompt, config = {} }) {
+export async function generateContent({ model = 'gemini-2.5-flash', prompt, config = {} , history = []}) {
 
     try {
 
@@ -43,13 +43,23 @@ export async function generateContent({ model = 'gemini-2.5-flash', prompt, conf
             // contents: prompt.message,  
 
             systemInstruction: prompt.system,
-            contents: [prompt.message], // Fixed: Must be an array in this SDK
+            contents:[
+                        ...history,
+                        {
+                            role:"user" , 
+                            parts:[{ 
+                                text : prompt.message
+                            }]
+                        }
+                    ], 
 
             generationConfig: {
                 temperature: config.temperature ?? 0.6,
                 topP: config.topP ?? 0.95,
                 maxOutputTokens: config.maxTokens ?? 800,
-            }
+            },
+
+            // history: history
         });
 
         // return response.text;

@@ -2542,3 +2542,159 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 ---
 
 *Last updated: 2026-04-30. This file grows as the project grows.*
+
+---
+
+## Project 2 — Upgrade: Stateful Tutor
+
+> Project 1 was stateless — every question was independent. Project 2 upgrades the same codebase to be stateful: the AI remembers what it said before, grades itself, and improves automatically.
+
+---
+
+## Task 1 — Conversation History Array (Multi-Turn Memory)
+
+### What It Is and Why It Matters
+
+In Project 1, every `generateContent` call sent only **the current question**. The AI had zero memory of previous turns. Asking "give me a harder example" after "explain C++ pointers" would produce a confused or generic response.
+
+In Project 2, every API call sends **the full conversation transcript** — every question and every answer from this session. This is called **multi-turn conversation** and it is exactly how ChatGPT, Gemini Chat, and Claude work under the hood.
+
+---
+
+### The Concept: What "Contents" Really Is
+
+The Gemini API has a field called `contents`. In single-turn mode (Project 1), we passed just the current message. In multi-turn mode, `contents` is an **ordered timeline** of every turn in the conversation:
+
+```javascript
+contents: [
+    { role: "user",  parts: [{ text: "Explain C++ pointers" }] },
+    { role: "model", parts: [{ text: "A pointer is a variable that stores..." }] },
+    { role: "user",  parts: [{ text: "Give me a harder example" }] }
+    // ← Gemini reads all of the above and then generates the next model turn
+]
+```
+
+**Rules:**
+- `role` is always either `"user"` or `"model"` — never anything else.
+- `parts` is always an array with one object: `{ text: "..." }`.
+- **Order matters:** history must come FIRST, the new message must come LAST.
+
+---
+
+### File: `src/geminiClient.js` — Changes Made
+
+**Before (Project 1):**
+```javascript
+export async function generateContent({ model, prompt, config = {} }) {
+    const response = await client.models.generateContent({
+        systemInstruction: prompt.system,
+        contents: prompt.message,
+        ...
+    });
+}
+```
+
+**After (Project 2):**
+```javascript
+export async function generateContent({ model, prompt, config = {}, history = [] }) {
+    const response = await client.models.generateContent({
+        systemInstruction: prompt.system,
+        contents: [
+            ...history,
+            {
+                role: "user",
+                parts: [{ text: prompt.message }]
+            }
+        ],
+        ...
+    });
+}
+```
+
+**Key changes:**
+1. `history = []` added as a parameter with a default of empty array — so all existing specialists (Quiz, Strategies, etc.) continue to work with zero changes.
+2. `contents` changed from a single string to an array: history turns spread first, then the new user message at the end.
+3. `prompt.message` is now wrapped in the correct `{ role, parts }` object format instead of passed as a raw string.
+
+**Why the default `history = []` matters:**
+When history is empty and you spread it (`...[]`), it adds nothing to the array. So `contents` becomes just the single current message — identical to how Project 1 behaved. This is backward compatibility by design.
+
+---
+
+### File: `index.js` — Changes Made
+
+A `conversationHistory` array is declared **above** the `while(true)` loop so it persists across all turns:
+```javascript
+const conversationHistory = [];
+```
+
+Before each specialist call, the user's message is pushed:
+```javascript
+conversationHistory.push({
+    role: "user",
+    parts: [{ text: userInput }]
+});
+```
+
+After `runExplainFlow` returns the AI response, it is pushed too:
+```javascript
+conversationHistory.push({
+    role: "model",
+    parts: [{ text: aiResponse }]
+});
+```
+
+### File: `src/explain.js` — Changes Made
+
+- Accepts `history` as a second parameter: `runExplainFlow(topic, history)`
+- Passes it to `generateContent`: `generateContent({ prompt, config, history })`
+- Returns the response string so `index.js` can push it into the history array
+
+---
+
+### Task 1 Bug Log
+
+**Bug — Wrong order: new message before history**
+
+```javascript
+// ❌ Wrong — timeline is reversed
+contents: [
+    { role: "user", parts: [{ text: prompt.message }] },  // new message FIRST
+    ...history                                              // past AFTER
+]
+
+// ✅ Correct — past comes before present
+contents: [
+    ...history,                                             // past FIRST
+    { role: "user", parts: [{ text: prompt.message }] }   // new message LAST
+]
+```
+
+The app worked even with the wrong order for short sessions because Gemini is smart enough to infer context regardless. But for longer conversations or context-sensitive questions, the reversed order would cause the model to misread the timeline.
+
+**Proof it worked:**
+```
+User: "tell me about pune city in india?"
+AI: "Pune is known as the Oxford of the East..."
+
+User: "how many talukas are there?"
+AI: "In Pune District, there are 15 talukas."
+```
+
+The AI answered "15 talukas in Pune District" without the user ever mentioning Pune in the second question. It read the history and understood the context — multi-turn memory is confirmed working.
+
+---
+
+| New Term | Meaning |
+|---|---|
+| Multi-turn conversation | A conversation where the AI has access to all previous exchanges, not just the current message |
+| `contents` | The Gemini API field that holds the full conversation timeline |
+| `role: "user"` | Marks a turn as coming from the human |
+| `role: "model"` | Marks a turn as coming from the AI |
+| `parts` | An array holding the text content of one turn |
+| Spread operator (`...`) | Unpacks an array into individual items inline — `...history` places all history objects directly into the `contents` array |
+| Backward compatibility | A code change that does not break existing callers — achieved here by defaulting `history = []` |
+
+---
+
+*Last updated: 2026-05-01. This file grows as the project grows.*
