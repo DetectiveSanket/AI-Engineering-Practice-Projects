@@ -2698,3 +2698,238 @@ The AI answered "15 talukas in Pune District" without the user ever mentioning P
 ---
 
 *Last updated: 2026-05-01. This file grows as the project grows.*
+
+---
+
+## Task 2 — In-Memory Session Store (Score Tracking)
+
+### What It Is
+
+Task 1 built the AI's memory of *what was said*. Task 2 builds a separate store for *how good the answers were*. Every time an explanation is evaluated (Task 3), a numeric score is saved here.
+
+## File: `src/sessionStore.js` — Line by Line
+
+```javascript
+const sessionStore = {
+    scores: [],       // array of { topic, score, timestamp }
+    totalScore: 0,    // sum of all scores
+    count: 0          // number of scored entries
+};
+```
+
+**Why `totalScore` and `count` separately?** So `getRunningAverage()` only needs one division instead of re-summing the whole array every time.
+
+```javascript
+export function getRunningAverage() {
+    return sessionStore.count === 0 ? 0 : (sessionStore.totalScore / sessionStore.count).toFixed(1);
+}
+```
+
+The ternary guard prevents a division-by-zero crash before any scores exist.
+
+`"█".repeat(item.score)` in `displayScores` creates a simple text progress bar — 4 blocks for score 4, 5 blocks for score 5.
+
+---
+
+## Task 3 — G-eval Self-Evaluation Loop
+
+### What G-eval Means
+
+**G-eval** stands for **Generation Evaluation**. A second LLM call grades the first LLM's output. This is the **LLM-as-judge** pattern.
+
+The full loop:
+```
+Generate explanation → Print → Evaluate → Display scores → If avg < 3 → Regenerate with CoT → Save score
+```
+
+---
+
+## File: `src/evaluator.js` — Line by Line
+
+```javascript
+const raw = await generateContent({ prompt, config: { temperature: 0 } });
+```
+
+**Why `temperature: 0`?** Scoring should be deterministic. Temperature 0 means the model always picks the highest-probability token — no randomness. A score of 4 should be 4 tomorrow for the same explanation.
+
+```javascript
+const start = raw.indexOf('{');
+const end   = raw.lastIndexOf('}');
+const scores = JSON.parse(raw.slice(start, end + 1));
+```
+
+Same safe JSON extraction as `quiz.js`. Finds the first `{` and last `}` and slices only the JSON out.
+
+```javascript
+const accuracy     = Number(scores.accuracy)     || 0;
+const average = parseFloat(((accuracy + clarity + completeness) / 3).toFixed(2));
+return { accuracy, clarity, completeness, average, reasoning: scores.reasoning ?? "" };
+```
+
+`Number(...) || 0` — defensive: defaults to 0 if model returned non-numeric. `toFixed(2)` returns a string → `parseFloat` converts back to number. `?? ""` is nullish coalescing — returns `""` only if `scores.reasoning` is `null` or `undefined`.
+
+**Fallback on failure:**
+```javascript
+return { accuracy: 3, clarity: 3, completeness: 3, average: 3, reasoning: "Evaluation failed." };
+```
+App never crashes — shows neutral scores instead.
+
+---
+
+## How History, Spread Operator, and Destructuring Work Together
+
+This is the most important concept in Project 2.
+
+### Step 1 — `index.js` declares the array above the loop
+```javascript
+const conversationHistory = [];
+```
+
+### Step 2 — Push user message before each specialist call
+```javascript
+conversationHistory.push({ role: "user", parts: [{ text: userInput }] });
+```
+
+After the first topic:
+```javascript
+[ { role: "user", parts: [{ text: "Explain C++ pointers" }] } ]
+```
+
+### Step 3 — Pass history to the specialist
+```javascript
+const aiResponse = await runExplainFlow(topic, conversationHistory);
+```
+
+### Step 4 — `explain.js` receives and forwards it
+```javascript
+export async function runExplainFlow(topic, history) {
+    const response = await generateContent({ prompt, config, history });
+}
+```
+
+### Step 5 — `geminiClient.js` receives via **object destructuring**
+```javascript
+export async function generateContent({ model, prompt, config = {}, history = [] }) {
+```
+
+The caller passes one object `{ prompt, config, history }`. JavaScript automatically extracts each named property. `history = []` is the default — if no history is passed, it uses an empty array. This is identical to writing:
+```javascript
+const history = options.history ?? [];
+```
+But built directly into the function signature.
+
+### Step 6 — The **spread operator** builds the `contents` array
+```javascript
+contents: [
+    ...history,
+    { role: "user", parts: [{ text: prompt.message }] }
+]
+```
+
+`...history` **unpacks** the array. If history has 2 items:
+```javascript
+history = [
+    { role: "user",  parts: [{ text: "Explain C++ pointers" }] },
+    { role: "model", parts: [{ text: "A pointer is..." }] }
+]
+```
+
+Then `...history` places both directly into the outer array (flat):
+```javascript
+contents: [
+    { role: "user",  parts: [{ text: "Explain C++ pointers" }] },
+    { role: "model", parts: [{ text: "A pointer is..." }] },
+    { role: "user",  parts: [{ text: "Give me a harder example" }] }
+]
+```
+
+Without `...` you would get a nested array — Gemini rejects this immediately.
+
+---
+
+### Task 3 Bug Log
+
+**Bug 1 — `evaluator.js` used `scores` before it existed**
+```javascript
+// ❌ Wrong — 'scores' was never defined
+const avg = (scores.accuracy + scores.clarity + scores.completeness) / 3;
+
+// ✅ Fix — call the API first, parse the JSON, then use scores
+const raw = await generateContent({ prompt, config: { temperature: 0 } });
+const scores = JSON.parse(raw.slice(raw.indexOf('{'), raw.lastIndexOf('}') + 1));
+```
+
+**Bug 2 — Output priming `\n{` broke JSON extraction**
+```javascript
+// ❌ Wrong — model completes AFTER the brace we appended
+prompt.message += "\n{";
+// Model response: "accuracy": 4, "clarity": 3}   ← no opening brace
+// raw.indexOf('{') finds wrong position
+
+// ✅ Fix — remove output priming, let model output the full JSON object
+// Model response: {"accuracy": 4, "clarity": 3, "completeness": 5}
+```
+
+**Bug 3 — `<1-5>` angle brackets confused the model**
+```javascript
+// ❌ Wrong — model sometimes returns literal <3> or gets confused
+{"accuracy": <1-5>, "clarity": <1-5>, "completeness": <1-5>}
+
+// ✅ Fix — use real example integers as the template
+{"accuracy": 4, "clarity": 3, "completeness": 5, "reasoning": "one sentence reason"}
+```
+
+**Bug 4 — Explanation text embedded in system instruction**
+```javascript
+// ❌ Wrong — system is for rules, not content
+system: `... Rate this explanation: ${explanation} ...`
+
+// ✅ Fix — explanation goes in message, system stays as pure rule
+system: `You are a strict academic evaluator. You only output valid JSON.`
+message: `Rate this explanation of "${topic}"...\n${explanation}\nReturn ONLY this JSON...`
+```
+
+**Bug 5 — Stray `import { generateContent }` in promptBuilder.js**
+```javascript
+// ❌ Wrong — promptBuilder.js is a pure function file; it should never make API calls
+import { generateContent } from "./geminiClient";
+
+// ✅ Fix — deleted. API calls belong in evaluator.js only.
+```
+
+**Bug 6 — `evalResult.toFixed(2)` called on an object**
+```javascript
+// ❌ Wrong — evaluateExplanation() returns an object, not a number
+console.log(`Average Score: ${evalResult.toFixed(2)} ⭐`);
+
+// ✅ Fix — access the property of the object
+console.log(`   Average: ${evalResult.average}/5`);
+```
+
+**Bug 7 — `addScore(topic, evalResult.average)` when evalResult was undefined**
+```javascript
+// ❌ Wrong — evaluator returned a plain number; .average was undefined
+addScore(topic, evalResult.average);  // NaN
+
+// ✅ Fix — after fixing evaluator.js to return a full object, .average is correct
+addScore(topic, evalResult.average);  // 4.33
+```
+
+---
+
+| New Term | Meaning |
+|---|---|
+| G-eval | Generation Evaluation — using an LLM to score another LLM's output |
+| LLM-as-judge | Pattern where an AI evaluates another AI's answer |
+| `temperature: 0` | Fully deterministic — model always picks the most probable token |
+| `toFixed(n)` | Returns a string with `n` decimal places |
+| `parseFloat` | Converts a string like `"4.33"` back to a number |
+| `??` (nullish coalescing) | Returns right side only if left is `null` or `undefined` |
+| Object destructuring | Extracting named properties from an object directly in a function signature |
+| Spread operator `...` | Unpacks an array into individual items inline |
+| Auto-regeneration | Automatically retrying with a better prompt when the score is too low |
+| CoT retry | Using Chain-of-Thought as the second attempt when direct explanation scores below 3 |
+
+---
+
+*Last updated: 2026-05-03. This file grows as the project grows.*

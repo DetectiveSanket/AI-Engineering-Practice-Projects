@@ -10,6 +10,8 @@
     - [ ] Update index.js to use promptBuilder
 */
 
+
+
 // 1. buildExplainPrompt(topic) — Zero-Shot Prompting
 export function buildExplainPrompt(topic) {
 
@@ -102,3 +104,23 @@ export function buildVerbalizedPrompt(topic){
 
     return prompt;
 };
+
+// 6. buildEvalPrompt(topic, explanation) - for G-eval self-scoring
+export function buildEvalPrompt(topic, explanation) {
+
+    const prompt = {
+        system: `You are a strict academic evaluator. You only output valid JSON. No markdown, no backticks, no extra text of any kind.`,
+
+        message: `Rate this explanation of "${topic}" on three dimensions. Each score must be an integer from 1 to 5.
+
+Explanation:
+${explanation}
+
+Return ONLY this exact JSON structure (use real integer scores, not placeholders):
+{"accuracy": 4, "clarity": 3, "completeness": 5, "reasoning": "one sentence reason"}`
+    };
+
+    return prompt;
+};
+
+// Note: callEval is no longer needed — evaluator.js handles all eval logic directly.

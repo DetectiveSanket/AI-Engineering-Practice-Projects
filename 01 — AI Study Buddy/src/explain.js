@@ -57,6 +57,9 @@
 import { generateContent } from './geminiClient.js';
 import { buildExplainPrompt } from './promptBuilder.js';
 import { logResponse } from './logger.js';
+import { evaluateExplanation } from './evaluator.js';
+import { addScore } from './sessionStore.js';
+
 
 
 /**
@@ -82,7 +85,34 @@ export async function runExplainFlow(topic , history) {
         console.log("\n🤖 ----- AI Study Buddy: ------ ");
         console.log(response);
         logResponse(topic , 'explanation' , prompt , response);
+
+        const evalResult = await evaluateExplanation(topic, response);
+
+        // --- Display the evaluation scores ---
+        console.log("\n📊 Self-Evaluation:");
+        console.log(`   Accuracy:     ${evalResult.accuracy}/5`);
+        console.log(`   Clarity:      ${evalResult.clarity}/5`);
+        console.log(`   Completeness: ${evalResult.completeness}/5`);
+        console.log(`   Average:      ${evalResult.average}/5`);
+        if (evalResult.reasoning) console.log(`   💬 "${evalResult.reasoning}"`);
+
+        // --- Auto-regeneration if score is too low ---
+        if (evalResult.average < 3) {
+            console.log("\n⚠️  Score too low. Regenerating with Chain-of-Thought...");
+            const { buildCoTPrompt } = await import('./promptBuilder.js');
+            const cotPrompt = buildCoTPrompt(topic);
+            const cotResponse = await generateContent({ prompt: cotPrompt, config: { temperature: 0.5 }, history });
+            console.log("\n🧠 ----- Improved Answer (CoT): ------");
+            console.log(cotResponse);
+            const cotEval = await evaluateExplanation(topic, cotResponse);
+            addScore(topic, cotEval.average);
+            console.log(`   📈 Regenerated Score: ${cotEval.average}/5`);
+        } else {
+            addScore(topic, evalResult.average);
+        }
+
         console.log("-------------------------------\n");
+
 
         
         return response;

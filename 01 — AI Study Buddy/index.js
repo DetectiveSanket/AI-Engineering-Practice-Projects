@@ -6,6 +6,8 @@ import { runQuizFlow } from './src/quiz.js';
 import { compareStrategies } from './src/strategies.js'
 import { addTopic, getHistory, clearSession , hasTopic} from './src/memory.js';
 import { saveSession } from './src/logger.js'
+import { addScore, displayScores, clearScores } from './src/sessionStore.js';
+
 
 const rl = readline.createInterface({ input, output });
 
@@ -43,7 +45,9 @@ async function run() {
 
         if(userInput === 'reset') {
             clearSession();
+            clearScores();
             console.log("✅ Session reset. Start fresh.");
+
             continue;
         }
 
@@ -62,6 +66,11 @@ async function run() {
             })
 
             continue; // why continue? => to skip the further steps like choice of questions, explanation, comparison, quiz, strategies 
+        }
+
+        if(userInput === 'score') {
+            displayScores();
+            continue;
         }
 
         // 2.6 check if userInput already exists in memeory.topic[];
@@ -130,6 +139,3 @@ run();
 rl.on("close", () => {
     process.exit(0);
 });
-
-
-
