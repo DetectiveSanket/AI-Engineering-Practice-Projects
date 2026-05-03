@@ -41,8 +41,8 @@ Every project here is:
 | # | Project | Concepts Covered | Stack | Status |
 |---|---------|-----------------|-------|--------|
 | 01 | [AI Study Buddy](#-project-01--ai-study-buddy) | LLM params, generation strategies, prompt engineering, JSON output, CoT, session memory | Node.js | 🟢 Complete |
-| 02 | [Study Buddy v2 — Stateful Tutor](#-project-02--study-buddy-v2--stateful-tutor) | Multi-turn memory, G-eval, LLM-as-judge, self-evaluation loop, component evals | Node.js | 🟡 In Progress |
-| 03 | [News Research Agent](#-project-03--news-research-agent) | ReAct pattern, tool use, agent loop, agentic memory, context engineering | Node.js | ⚪ Planned |
+| 02 | [Study Buddy v2 — Stateful Tutor](#-project-02--study-buddy-v2--stateful-tutor) | Multi-turn memory, G-eval, LLM-as-judge, self-evaluation loop, component evals | Node.js | 🟢 Complete |
+| 03 | [News Research Agent](#-project-03--news-research-agent) | ReAct pattern, tool use, agent loop, agentic memory, context engineering | Node.js | 🟡 In Progress |
 | 04 | [Research Agent + Knowledge Base](#-project-04--research-agent--knowledge-base) | RAG from scratch, chunking strategies, ChromaDB, HyDE, Agentic RAG | Node.js + Python | ⚪ Planned |
 | 05 | [MCP Server + Observability](#-project-05--mcp-server--observability) | MCP architecture, MCP tools/resources, LLM tracing, Opik, multi-turn evals | Python | ⚪ Planned |
 | 06 | [AI Code Review System](#-project-06--ai-code-review-system) | Multi-agent orchestration, A2A protocol, red teaming, FastAPI deployment | Python | ⚪ Planned |
@@ -149,7 +149,7 @@ A command-line tool where you type any technical topic and the system generates 
 **Domain:** Education / CLI tool  
 **Language:** Node.js (JavaScript)  
 **Duration:** 1 week  
-**Status:** 🟡 In Progress
+**Status:** 🟢 Complete
 
 #### What it adds over Project 01
 - Full multi-turn conversation history passed to every API call
@@ -174,7 +174,7 @@ A command-line tool where you type any technical topic and the system generates 
 **Domain:** News research / automated reporting  
 **Language:** Node.js (JavaScript)  
 **Duration:** 3 weeks  
-**Status:** ⚪ Planned
+**Status:** 🟡 In Progress
 
 #### What it does
 Takes a research question. Autonomously decides which tools to call. Reasons step-by-step using the ReAct pattern (Thought → Action → Observation → repeat). Produces a structured JSON report with sources.
