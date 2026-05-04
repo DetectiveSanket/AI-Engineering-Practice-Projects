@@ -102,8 +102,12 @@ export async function runExplainFlow(topic , history) {
             const { buildCoTPrompt } = await import('./promptBuilder.js');
             const cotPrompt = buildCoTPrompt(topic);
             const cotResponse = await generateContent({ prompt: cotPrompt, config: { temperature: 0.5 }, history });
+
             console.log("\n🧠 ----- Improved Answer (CoT): ------");
             console.log(cotResponse);
+
+            logResponse(topic , 'cot' , cotPrompt , cotResponse);
+
             const cotEval = await evaluateExplanation(topic, cotResponse);
             addScore(topic, cotEval.average);
             console.log(`   📈 Regenerated Score: ${cotEval.average}/5`);

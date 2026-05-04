@@ -27,7 +27,6 @@ const session = {
 
 //* Add the topic to the session
 export function addTopic(topic) {
-    // first check topic is in the list if yes dont add topic else push the new topic
     session.topic.push({ 
         topic: topic,
         timestamp: Date.now()
@@ -51,6 +50,7 @@ export function getHistory(){
 
 };
 
+//* function that clears the session data.
 export function clearSession() {
     // clear the session
     session.topic = [];

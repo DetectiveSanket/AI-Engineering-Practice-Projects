@@ -4,13 +4,17 @@ import { generateContent } from './geminiClient.js';
 import { buildQuizPrompt } from './promptBuilder.js';
 import { logResponse } from './logger.js';
 
+// const prompt = buildQuizPrompt(topic);  // buildQuizPrompt requires topic. So we cant define it here.
 
 export async function generateQuiz(topic) {
 
     try{
 
+        const prompt = buildQuizPrompt(topic);
+        
         const response = await generateContent({
-            prompt: buildQuizPrompt(topic),
+            // prompt: buildQuizPrompt(topic),
+            prompt: prompt,
             config : {
                 temperature: 0.2,
                 maxTokens: 450  // Caps output — enough for 3 questions, prevents 15-question overload
@@ -54,9 +58,8 @@ export async function generateQuiz(topic) {
         console.log('✅ Quiz Generated! Here are your questions:');
         // console.log(JSON.stringify(data, null, 2)); //! print the string in proper format.
 
-        return data;
-
-
+        // return data;
+        return {data , prompt};
 
     }catch(error) {
         throw new Error(`Failed to generate quiz: ${error.message}`);
@@ -67,8 +70,13 @@ export async function generateQuiz(topic) {
 export async function runQuizFlow(topic , rl) {
 
     console.log(`🧠 Generating a ${topic} Quiz for you...`);
-    const quiz = await generateQuiz(topic);
-    const questions = quiz.questions; // extract only question from the quiz object
+    // const quiz = await generateQuiz(topic);
+
+    // 1. Get BOTH data and prompt from generateQuiz
+    const {data , prompt} = await generateQuiz(topic)
+
+    // 2. Extract the questions from the data object
+    const questions = data.questions; // extract only question from the quiz object
 
 
     for( let i = 0; i < questions.length; i++) {
@@ -83,7 +91,7 @@ export async function runQuizFlow(topic , rl) {
         console.log(`D. ${q.options.D}`);
 
         const answer = await rl.question('\nYour answer (A-D): ');
-        // logResponse(topic , 'quiz' , buildQuizPrompt(topic) , answer);
+        logResponse(topic , 'quiz' , prompt , answer); // logging the user answer for future use
 
         if(answer.toUpperCase() === q.answer.toUpperCase()) {
             console.log('\n✅ Correct!\n');

@@ -31,28 +31,36 @@ export function logResponse (topic , strategy , prompt , response) {
 
 export function saveSession() {
 
+    // push the current time as endTIme into logger...
     logger.endTime = Date.now();
 
+    // log directory ->  
+    // __direname :  -> 01 — AI Study Buddy/src (it goes backward)
+    // ..        -> 01 — AI Study Buddy
+    // logs      -> logs (folder name)
     const logsDire = path.join(
         __direname ,
-        '..',
-        'logs'        
+        '..', // it goes to the main directory
+        'logs' // Folder Name where logs are saved (like) 
     );
 
-    // create log files
+    // create log files (root folder) if not exist
     if (!fs.existsSync(logsDire)) {
         fs.mkdirSync(logsDire , {
-            recursive : true
+            recursive : true // if logs folder doesn't exist, create it with all parent folders 
         });
     }
 
     // create log file name with timestamp
     const filename = `session-${Date.now()}.json`;
 
-    const filepath = path.join(logsDire , filename);
+    const filepath = path.join(logsDire , filename);// path -> creates paths to json files and join them together ( like this -> /logs/session-1234567890.json ) 
 
-    // write json
-    fs.writeFileSync(filepath , JSON.stringify(logger , null , 2)); // 2 is indentation level (pretty-printing)
+    // write json. Json.stringify -> to convert js object into json string.(for file writing). (so that the file can be read by other programs).
+    fs.writeFileSync(filepath , JSON.stringify(logger , null , 2)); // 2 is indentation level (pretty-printing) or space between lines 
+    // logger -> the object that contain the log info in object form
+    // null -> we dont have any replacer function. Means dont use custom logic for replacing. (for file writing). 
+    // 2 -> it is for indentation space , to make the json file readable
 
     console.log(`📝 Session logged to: ${filepath}`);
     

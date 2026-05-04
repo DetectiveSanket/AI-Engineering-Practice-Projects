@@ -9,9 +9,7 @@ import { logResponse } from './logger.js';
 // diverseConfig  → temperature: 1.0, topP: 0.7
 
 const greedyConfig = { temperature : 0.1 , topP : 1.0 }; // Least creative answer - focused answer
-
 const samplingConfig = { temperature : 0.8 , topP : 0.9 }; // Balanced answer
-
 const diverseConfig = { temperature : 1.0 , topP : 0.7 }; // most creative answer   
 
 export async function compareStrategies(topic) { // export async function to compare the strategies

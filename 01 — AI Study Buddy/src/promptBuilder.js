@@ -12,7 +12,7 @@
 
 
 
-// 1. buildExplainPrompt(topic) — Zero-Shot Prompting
+//* 1. buildExplainPrompt(topic) — Zero-Shot Prompting
 export function buildExplainPrompt(topic) {
 
     const prompt = {
@@ -32,7 +32,7 @@ export function buildExplainPrompt(topic) {
     return prompt;
 };
 
-// 2. `buildQuizPrompt(topic)` — The "Output Format" Technique
+//* 2. `buildQuizPrompt(topic)` — The "Output Format" Technique
 export function buildQuizPrompt(topic) {
     const prompt = {
         // Keep system minimal — experimental models often ignore it
@@ -42,18 +42,18 @@ export function buildQuizPrompt(topic) {
         // We end the message with the opening of the JSON so the model is FORCED to continue it.
         message: `Generate EXACTLY 3 multiple-choice quiz questions about "${topic}".
 
-Rules:
-- Return ONLY a raw JSON object. No markdown. No backticks. No explanation. No greeting.
-- Each question must have 4 options labeled A, B, C, D.
-- The "answer" field must be the letter (A, B, C, or D) of the correct option.
+        Rules:
+        - Return ONLY a raw JSON object. No markdown. No backticks. No explanation. No greeting.
+        - Each question must have 4 options labeled A, B, C, D.
+        - The "answer" field must be the letter (A, B, C, or D) of the correct option.
 
-Use this exact structure:
-{"questions":[{"question":"Question text?","options":{"A":"Option text","B":"Option text","C":"Option text","D":"Option text"},"answer":"A"},{"question":"Question text?","options":{"A":"Option text","B":"Option text","C":"Option text","D":"Option text"},"answer":"B"},{"question":"Question text?","options":{"A":"Option text","B":"Option text","C":"Option text","D":"Option text"},"answer":"C"}]}`
+        Use this exact structure:
+        {"questions":[{"question":"Question text?","options":{"A":"Option text","B":"Option text","C":"Option text","D":"Option text"},"answer":"A"},{"question":"Question text?","options":{"A":"Option text","B":"Option text","C":"Option text","D":"Option text"},"answer":"B"},{"question":"Question text?","options":{"A":"Option text","B":"Option text","C":"Option text","D":"Option text"},"answer":"C"}]}`
     };
     return prompt;
 };
 
-// 3. buildCoTPrompt(topic) — The "Chain-of-Thought" (CoT) Technique
+//* 3. buildCoTPrompt(topic) — The "Chain-of-Thought" (CoT) Technique
 export function buildCoTPrompt(topic) {
     const prompt = {
         system: `
@@ -67,8 +67,7 @@ export function buildCoTPrompt(topic) {
     return prompt;
 };
 
-//4. buildComparePrompt(topic) - for stragtegies module
-
+//* 4. buildComparePrompt(topic) - for stragtegies module
 export function buildComparePrompt(topic){
 
     const prompt = {
@@ -88,7 +87,7 @@ export function buildComparePrompt(topic){
     return prompt;
 };
 
-// 5. buildVerbalizedPrompt(topic) - for stragtegies module
+//* 5. buildVerbalizedPrompt(topic) - for stragtegies module
 export function buildVerbalizedPrompt(topic){
 
     const prompt = {
@@ -105,7 +104,7 @@ export function buildVerbalizedPrompt(topic){
     return prompt;
 };
 
-// 6. buildEvalPrompt(topic, explanation) - for G-eval self-scoring
+//* 6. buildEvalPrompt(topic, explanation) - for G-eval self-scoring (G-eval full form = self - evaluation)
 export function buildEvalPrompt(topic, explanation) {
 
     const prompt = {
@@ -113,14 +112,13 @@ export function buildEvalPrompt(topic, explanation) {
 
         message: `Rate this explanation of "${topic}" on three dimensions. Each score must be an integer from 1 to 5.
 
-Explanation:
-${explanation}
+        Explanation:
+        ${explanation}
 
-Return ONLY this exact JSON structure (use real integer scores, not placeholders):
-{"accuracy": 4, "clarity": 3, "completeness": 5, "reasoning": "one sentence reason"}`
+        Return ONLY this exact JSON structure (use real integer scores, not placeholders):
+        {"accuracy": 4, "clarity": 3, "completeness": 5, "reasoning": "one sentence reason"}`
     };
 
     return prompt;
 };
 
-// Note: callEval is no longer needed — evaluator.js handles all eval logic directly.

@@ -6,7 +6,7 @@ import { runQuizFlow } from './src/quiz.js';
 import { compareStrategies } from './src/strategies.js'
 import { addTopic, getHistory, clearSession , hasTopic} from './src/memory.js';
 import { saveSession } from './src/logger.js'
-import { addScore, displayScores, clearScores } from './src/sessionStore.js';
+import { displayScores, clearScores } from './src/sessionStore.js';
 
 
 const rl = readline.createInterface({ input, output });
@@ -132,7 +132,7 @@ async function run() {
             console.error("❌ Main Loop Error:", error.message);
         }
     }
-}
+};
 
 run();
 
