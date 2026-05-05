@@ -1,0 +1,268 @@
+# News Research Agent — Resolved Session Log
+
+> **Audience:** Someone who wants to understand what was attempted, what failed, and what was fixed.
+> **Style:** Dense, structured. Focus on decisions, mistakes, and reasoning behind fixes.
+
+---
+
+## Table of Contents
+
+- [Task 1 — Project Scaffold & Entry Point](#task-1--project-scaffold--entry-point)
+- [Task 2 — Gemini Client](#task-2--gemini-client)
+- [Bug Log](#bug-log)
+- [Glossary](#glossary)
+
+---
+
+## Task 1 — Project Scaffold & Entry Point
+
+### What was built
+
+| File | Role |
+|---|---|
+| `package.json` | Project manifest — declares dependencies, scripts, and module type |
+| `.gitignore` | Prevents secrets and `node_modules` from being committed to git |
+| `index.js` | CLI entry point — readline loop that accepts user input and calls the AI |
+
+### Step-by-step
+
+**Step 1 — Set `"type": "module"` in `package.json`**
+
+```json
+"type": "module"
+```
+
+This enables ES Module syntax (`import`/`export`) across the entire project. Without this, Node.js defaults to CommonJS (`require`/`module.exports`) and `import` statements throw a syntax error.
+
+**Step 2 — Add scripts**
+
+```json
+"scripts": {
+    "start": "node index.js",
+    "dev": "nodemon index.js"
+}
+```
+
+`nodemon` auto-restarts the server when files change — useful during development. Note: `nodemon` is not in the dependencies yet; it would need to be installed separately as a dev dependency if used.
+
+**Step 3 — Create the readline loop**
+
+```js
+const rl = readline.createInterface({ input, output });
+
+while(true) {
+    const userInput = await rl.question("...");
+    if(userInput.toLowerCase() === 'exit') { rl.close(); break; }
+    const response = await generateContent({ prompt: {...}, config: {...} });
+    console.log(response);
+}
+```
+
+The loop acts as a primitive REPL (Read-Eval-Print Loop) — the simplest possible shell for testing the AI call.
+
+---
+
+### Mistakes & Fixes
+
+**❌ Wrong: `SIGINT` handler placed inside `run()` scope (indentation suggests it)**
+
+```js
+async function run() {
+    process.on('SIGINT', () => { process.exit(0); });
+    ...
+}
+```
+
+If `run()` is called multiple times (or the loop restarts), you'd register duplicate handlers. `SIGINT` handlers should be registered once at the module level.
+
+**✅ Fixed: Move `process.on('SIGINT')` to module level (outside `run()`)**
+
+```js
+process.on('SIGINT', () => { process.exit(0); });
+
+async function run() { ... }
+```
+
+This registers exactly one handler, immediately when the module loads.
+
+---
+
+**❌ Wrong: `rl.on("close")` registered after `run()` call**
+
+```js
+run();
+
+rl.on("close", () => { process.exit(0); });
+```
+
+`run()` is async — it returns a Promise immediately. The `rl.on("close", ...)` line executes synchronously right after, before `run()` has finished. This is actually fine in this specific case (event listeners are registered, not called), but the ordering is confusing and could mislead future readers into thinking the close handler fires *after* the run function completes.
+
+**✅ Better pattern: Register the close handler before calling `run()`**
+
+```js
+rl.on("close", () => { process.exit(0); });
+run();
+```
+
+Cleaner intent: set up all handlers, then start the loop.
+
+---
+
+## Task 2 — Gemini Client
+
+### What was built
+
+| File | Role |
+|---|---|
+| `src/geminiClient.js` | Abstraction layer over the `@google/genai` SDK. Single source of truth for all Gemini API calls. |
+
+### Step-by-step
+
+**Step 1 — Set up dotenv with ESM-compatible `__dirname`**
+
+In CommonJS, `__dirname` is a free variable. In ES Modules it does not exist.
+
+```js
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+config({ path: join(__dirname, "..", ".env") });
+```
+
+This is the canonical ESM workaround. `import.meta.url` gives the current file's URL; `fileURLToPath` converts it to a filesystem path; `dirname` strips the filename; `join(..., "..")` moves one level up to the project root where `.env` lives.
+
+**Step 2 — Create the SDK client as a singleton**
+
+```js
+const client = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+```
+
+Created once at module load — not inside the function. This avoids recreating the client on every API call (connection overhead, object churn).
+
+**Step 3 — Export `generateContent` with destructured defaults**
+
+```js
+export async function generateContent({ model = 'gemini-2.5-flash-preview', prompt, config = {} }) {
+```
+
+Default values inside destructuring make the function ergonomic. Callers only need to pass what they care about.
+
+**Step 4 — Guard clause before the API call**
+
+```js
+if(!process.env.GEMINI_API_KEY) {
+    throw new Error("GEMINI_API_KEY is missing in .env file");
+}
+```
+
+Fail fast with a human-readable message. Without this, the SDK throws a cryptic 401 HTTP error that doesn't tell you *why* it failed.
+
+**Step 5 — Handle SDK version inconsistency**
+
+```js
+return typeof response.text === 'function' ? response.text() : response.text;
+```
+
+The `@google/genai` SDK changed `response.text` from a callable function to a direct string property between versions. This ternary guards against both shapes.
+
+---
+
+### Mistakes & Fixes
+
+**❌ Wrong: Model name `gemini-3-flash-preview` (does not exist)**
+
+```js
+export async function generateContent({ model = 'gemini-3-flash-preview', ... }) {
+```
+
+As of writing, there is no `gemini-3-flash-preview` model. This would cause the API to return a 404 / model-not-found error at runtime.
+
+**✅ Fixed: Use the correct model name**
+
+```js
+export async function generateContent({ model = 'gemini-2.5-flash-preview', ... }) {
+```
+
+Always verify model names against [Google's model list](https://ai.google.dev/gemini-api/docs/models). The current fast/cheap model is `gemini-2.5-flash-preview-05-20` (or similar).
+
+---
+
+**❌ Wrong: `config` parameter name shadows the imported `config` from dotenv**
+
+```js
+import { config } from "dotenv"; // 'config' = dotenv's loader function
+
+export async function generateContent({ ..., config = {} }) {  // 'config' = generation settings
+```
+
+Inside `generateContent`, the parameter `config` shadows the module-level `config` (dotenv). If dotenv's `config()` were called inside this function, it would call the wrong thing. This is a latent naming collision bug.
+
+**✅ Fix: Rename one of them to avoid the shadow**
+
+Option A — rename the parameter:
+```js
+export async function generateContent({ ..., generationConfig = {} }) {
+```
+
+Option B — rename the import (used throughout this project since dotenv is called at module top):
+```js
+import { config as loadEnv } from "dotenv";
+loadEnv({ path: join(__dirname, "..", ".env") });
+```
+
+Since dotenv's `config` is only called once at module load (not inside any function), the current code doesn't break at runtime — but it is a code smell that could confuse future developers.
+
+---
+
+**❌ Wrong: `maxOutputTokens` key mismatch**
+
+In `index.js`:
+```js
+config: { maxOutputTokens: 300 }
+```
+
+In `geminiClient.js`:
+```js
+maxOutputTokens: config.maxTokens ?? 800,
+//                      ^^^^^^^^ expects 'maxTokens', not 'maxOutputTokens'
+```
+
+The caller passes `maxOutputTokens` but the client reads `maxTokens`. The `?? 800` fallback silently hides this — the caller's value is never used and the model always defaults to 800 tokens.
+
+**✅ Fixed: Align the key name in `geminiClient.js`**
+
+```js
+maxOutputTokens: config.maxOutputTokens ?? 800,
+```
+
+Or better — use the same key name throughout the entire codebase. Pick one convention and stick to it.
+
+---
+
+## Bug Log
+
+| # | File | Bug | Severity | Status |
+|---|---|---|---|---|
+| 1 | `index.js` | `SIGINT` handler indented inside `run()` body — misleading scope | Low | ⚠️ Cosmetic (works, confusing) |
+| 2 | `index.js` | `rl.on("close")` registered after `run()` call | Low | ⚠️ Cosmetic (works) |
+| 3 | `geminiClient.js` | Default model `gemini-3-flash-preview` does not exist | **High** | ❌ Will fail at runtime |
+| 4 | `geminiClient.js` | `config` parameter shadows `config` import from dotenv | Medium | ⚠️ Latent / code smell |
+| 5 | `geminiClient.js` | `config.maxTokens` doesn't match `maxOutputTokens` from caller | Medium | ❌ Caller value silently ignored |
+
+---
+
+## Glossary
+
+| Term | Meaning |
+|---|---|
+| **REPL** | Read-Eval-Print Loop — a program that reads input, evaluates it, prints the result, and repeats |
+| **Singleton** | A design pattern where only one instance of an object is ever created |
+| **Guard clause** | A condition check at the top of a function that exits early if preconditions aren't met |
+| **Fail fast** | Crashing immediately with a clear error rather than silently producing wrong results |
+| **Variable shadowing** | When an inner-scope variable has the same name as an outer-scope one, hiding it |
+| **Nullish coalescing (`??`)** | Returns the right-hand value only if left is `null` or `undefined` — not `0` or `""` |
+| **ESM (`"type":"module"`)** | ES Module mode — requires `import`/`export` syntax; `__dirname` and `require` are not available |
+| **`import.meta.url`** | ESM replacement for `__filename` — gives the URL of the current module file |
+| **Destructured defaults** | Setting fallback values inside function parameter destructuring: `{ key = defaultValue }` |
+| **Abstraction layer** | A module that wraps complex/third-party logic so the rest of the app doesn't need to know the details |
+| **System instruction** | A privileged prompt sent to the Gemini API that defines the model's persona/rules (separate from user content) |
+| **Context window** | The total amount of text (tokens) the model can "see" at once — prompt + history + response |
