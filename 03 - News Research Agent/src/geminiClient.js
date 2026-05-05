@@ -32,12 +32,12 @@ export async function generateContent({model = 'gemini-3-flash-preview', prompt,
 
         const response = await client.models.generateContent({
             model:model,
-            systemInstruction: prompt.system, // New part
+            systemInstruction: prompt.system,
             contents: prompt.message,  
             config:{
                 temperature: config.temperature ?? 0.6,
                 topP: config.topP ?? 0.95,
-                maxOutputTokens: config.maxTokens ?? 800,
+                maxOutputTokens: config.maxOutputTokens ?? 800,
             },
 
             // contents:[

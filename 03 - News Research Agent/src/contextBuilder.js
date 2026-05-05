@@ -1,23 +1,24 @@
 
-import { generateContent } from './geminiClient.js';
 
+// returns the system prompt string with tool descriptions
+export function buildPromptWithTools(){
+    
+    return `
+    You are a research agent. Your job is to answer questions by searching for information.
 
-//* 1 - Normal prompt 
-export function buildPrompt(topic) {
+    You have access to these tools:
+    - web_search(query): Search for recent news on a topic
+    - summarize(text): Condense long text into key points
+    - check_claim(claim): Verify if a claim is accurate
 
-    const prompt = {
+    Use this EXACT format every time:
+    Thought: [your reasoning about what to do next]
+    Action: toolName(argument here)
 
-        system : `You are an expert news researcher. Your goal is to thoroughly research the given topic and produce a comprehensive report. 
-        
-        Rules:
-        1. Use tools to gather information.
-        2. Reason about what information is missing.
-        3. Only stop when you have enough information to write the report.
-        4. Output clear, well-structured explanations.
-        `,
+    When you have enough information to answer, use:
+    Thought: I now have enough information
+    Final Answer: [your complete answer]
 
-        message: topic
-    }
-
-    return prompt;
+    Never skip the Thought step. Never call two tools in one action.    
+    `
 };

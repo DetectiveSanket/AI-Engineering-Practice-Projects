@@ -1,7 +1,7 @@
 import { generateContent } from './src/geminiClient.js';
 import * as readline from 'node:readline/promises';
 import { stdin as input, stdout as output } from 'node:process'; 
-import { buildPrompt } from './src/contextBuilder.js';
+import { buildPromptWithTools } from './src/contextBuilder.js';
 
 
 const rl = readline.createInterface({ input, output });
@@ -32,7 +32,10 @@ async function run() {
 
             // calling the gemini function
             const response = await generateContent({
-                prompt: buildPrompt(userInput),
+                prompt: {
+                    system: buildPromptWithTools(),
+                    message: userInput
+                },
                 config:{
                     temperature: 0.6,
                     topP: 0.95,
@@ -57,3 +60,23 @@ rl.on("close", () => {
     process.exit(0);
 });
 
+
+/* 
+    ### Day 1 — Setup + plain LLM call with system prompt
+
+        > Goal: Gemini responds in the ReAct format (even without real tools yet).
+
+        Tasks:
+        - [x] mkdir "03 News Research Agent" && cd into it
+        - [x] npm init -y
+        - [x] npm install @google/genai dotenv
+        - [x] Create .env with GEMINI_API_KEY
+        - [x] Write index.js — hardcoded question: "What happened with AI regulation this week?"
+        - [x] Write geminiClient.js — single function callGemini (prompt, options)
+        - [ ] Write contextBuilder.js — returns the system prompt string with tool descriptions
+        - [x] Call Gemini with the system prompt + user question
+        - [x] Print raw output — you should see it write "Thought: ..." and "Action: web_search(...)"
+
+        > Definition of done: Gemini outputs text that LOOKS like ReAct format even though no tools exist yet. You can see it trying to call a tool.    
+
+*/

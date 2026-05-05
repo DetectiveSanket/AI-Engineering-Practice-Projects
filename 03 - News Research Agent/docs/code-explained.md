@@ -9,6 +9,7 @@
 
 - [Task 1 — Project Scaffold & Entry Point (`index.js`)](#task-1--project-scaffold--entry-point-indexjs)
 - [Task 2 — Gemini Client (`src/geminiClient.js`)](#task-2--gemini-client-srcgeminiclientjs)
+- [Task 3 — Context Builder (`src/contextBuilder.js`)](#task-3--context-builder-srccontextbuilderjs)
 - [Master Concepts Glossary](#master-concepts-glossary)
 
 ---
@@ -256,6 +257,115 @@ The Google GenAI SDK has had inconsistencies across versions — in some version
 | `??` nullish coalescing | Returns right-hand value only if left-hand is `null` or `undefined` (not `0` or `""`) |
 | Ternary operator `? :` | A compact `if/else` in one line |
 | Singleton pattern | Creating one shared instance of a resource (the SDK client) instead of recreating it repeatedly |
+
+---
+
+## Task 3 — Context Builder (`src/contextBuilder.js`)
+
+### What this file does and WHY it exists
+
+`contextBuilder.js` is responsible for **constructing the system prompt** — the set of instructions the LLM reads before it sees the user's question. It is a pure data-builder: it receives no user input and makes no API calls. It just returns a carefully crafted string.
+
+**Why isolate the prompt here instead of writing it directly in `index.js`?**
+- The system prompt is the agent's "brain" — it will grow complex over time (tool descriptions, formatting rules, constraints). Keeping it in its own file prevents `index.js` from becoming cluttered.
+- If you want to experiment with different prompting strategies, you change one file without touching the loop or the API client.
+- It is the correct place for **context engineering** — the discipline of carefully designing what the LLM sees.
+
+---
+
+### Line-by-line explanation
+
+#### The exported function
+
+```js
+export function buildPromptWithTools() {
+    return `...`
+}
+```
+
+- **`export function`** — makes this function importable by other files. No `async` needed because this function does no I/O — it just builds a string.
+- Returns a **template literal** (backtick string) — allows the multi-line, indented text to be written naturally in the source code.
+
+#### The system prompt content — broken down
+
+```
+You are a research agent. Your job is to answer questions by searching for information.
+```
+
+This is the **persona line**. It tells the model *who it is*. LLMs respond differently based on how they're told to think of themselves. "Research agent" primes the model to look for information rather than reason from memory.
+
+```
+You have access to these tools:
+- web_search(query): Search for recent news on a topic
+- summarize(text): Condense long text into key points
+- check_claim(claim): Verify if a claim is accurate
+```
+
+This is the **tool manifest** — a description of every tool the agent is *allowed* to call. The LLM doesn't have actual access to these tools yet (Day 1). But by telling it they exist, the model will *pretend* to call them, which produces the ReAct-format output we want to see.
+
+Each tool is described with:
+- A **name** (must exactly match what the tool dispatcher will parse later)
+- **Argument type** in parentheses
+- A plain-English **description** of what it does
+
+```
+Use this EXACT format every time:
+Thought: [your reasoning about what to do next]
+Action: toolName(argument here)
+```
+
+This is the **format contract** — the most critical part of the prompt. It tells the model exactly how to structure its output. The word "EXACT" is intentional; it reduces the chance the model deviates from the format.
+
+- **`Thought:`** — forces the model to externalize its reasoning before acting (this is the "Re" in ReAct — *Re*ason).
+- **`Action:`** — a structured action string that your tool dispatcher will parse as `toolName(argument)` (this is the "Act" in ReAct).
+
+```
+When you have enough information to answer, use:
+Thought: I now have enough information
+Final Answer: [your complete answer]
+```
+
+This tells the model **how to signal that it is done**. Your agent loop (built in a later task) will scan for the `Final Answer:` token to know when to stop the loop and print the result.
+
+```
+Never skip the Thought step. Never call two tools in one action.
+```
+
+Two hard constraints:
+1. Keeps the output parseable — every action is preceded by a thought.
+2. Forces single-step actions — prevents the model from trying to do too much in one turn, which would break the dispatcher.
+
+#### How `index.js` uses this function
+
+```js
+import { buildPromptWithTools } from './src/contextBuilder.js';
+
+// Inside the loop:
+const response = await generateContent({
+    prompt: {
+        system: buildPromptWithTools(),   // ← injected as systemInstruction
+        message: userInput                // ← the user's research question
+    },
+    ...
+})
+```
+
+`buildPromptWithTools()` is called once per loop iteration. Its return value goes into `prompt.system`, which `geminiClient.js` passes to Gemini's `systemInstruction` field — a privileged slot the model reads before anything else.
+
+---
+
+### Key concepts introduced in Task 3
+
+| Concept | Plain English |
+|---|---|
+| Context engineering | The discipline of carefully designing what goes into the LLM's context window to shape its behavior |
+| System prompt | A privileged instruction block the model reads before the user message — sets persona, rules, format |
+| Tool manifest | A list of available tools and their signatures, described in plain English inside the prompt |
+| Format contract | The exact output format you instruct the model to follow so your parser can reliably read it |
+| ReAct format | Alternating `Thought:` and `Action:` lines — forces the model to reason before acting |
+| `Final Answer:` token | A special marker the agent loop watches for to know when to stop iterating |
+| Pure function | A function that takes inputs (or no inputs) and returns a value, with no side effects — `buildPromptWithTools` is one |
+| Template literal | A backtick string in JavaScript that supports multi-line text and embedded expressions via `${}` |
 
 ---
 

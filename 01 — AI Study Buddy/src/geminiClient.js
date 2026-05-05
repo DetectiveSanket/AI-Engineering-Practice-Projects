@@ -56,7 +56,7 @@ export async function generateContent({ model = 'gemini-2.5-flash', prompt, conf
             generationConfig: {
                 temperature: config.temperature ?? 0.6,
                 topP: config.topP ?? 0.95,
-                maxOutputTokens: config.maxTokens ?? 800,
+                maxOutputTokens: config.maxOutputTokens ?? 800,
             },
 
             // history: history

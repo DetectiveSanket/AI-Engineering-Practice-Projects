@@ -9,6 +9,7 @@
 
 - [Task 1 — Project Scaffold & Entry Point](#task-1--project-scaffold--entry-point)
 - [Task 2 — Gemini Client](#task-2--gemini-client)
+- [Task 3 — Context Builder](#task-3--context-builder)
 - [Bug Log](#bug-log)
 - [Glossary](#glossary)
 
@@ -238,15 +239,103 @@ Or better — use the same key name throughout the entire codebase. Pick one con
 
 ---
 
+## Task 3 — Context Builder
+
+### What was built
+
+| File | Role |
+|---|---|
+| `src/contextBuilder.js` | Pure function that returns the ReAct-format system prompt string. No API calls, no imports — just a string builder. |
+
+### Step-by-step
+
+**Step 1 — `buildPromptWithTools()` — the system prompt factory**
+
+The function returns a template literal containing four sections:
+1. **Persona line** — `"You are a research agent..."` — primes the model to look for information rather than reason from memory.
+2. **Tool manifest** — describes the three tools (`web_search`, `summarize`, `check_claim`) so the model "knows" what actions are available.
+3. **Format contract** — the `Thought:` / `Action:` / `Final Answer:` format the model must follow.
+4. **Hard constraints** — `Never skip the Thought step. Never call two tools in one action.` — guards against output that would break the parser.
+
+**Step 2 — Wired into `index.js`**
+
+```js
+prompt: {
+    system: buildPromptWithTools(),
+    message: userInput
+}
+```
+
+`buildPromptWithTools()` produces the `system` value; `userInput` is the user's question. `geminiClient.js` passes `system` into Gemini's `systemInstruction` field.
+
+**Step 3 — Day 1 definition of done achieved**
+
+With the ReAct system prompt in place, Gemini now outputs structured text like:
+```
+Thought: I need to search for recent news on this topic.
+Action: web_search("AI regulation 2025")
+```
+No real tool is being called yet — the model is just *pretending* based on the prompt instructions. But the format is parseable, which is exactly what Day 1 requires.
+
+---
+
+### Mistakes & Fixes
+
+**❌ Wrong: `contextBuilder.js` imported `geminiClient.js` with a dead import**
+
+```js
+// Original — contextBuilder.js line 2
+import { generateContent } from './geminiClient.js';
+```
+
+`contextBuilder.js` is a pure string-builder. It never calls `generateContent`. Importing it was a mistake that introduced a hidden dependency and potential circular import risk.
+
+**✅ Fixed: Deleted the dead import**
+
+```js
+// contextBuilder.js is now free of all imports
+export function buildPromptWithTools() { ... }
+```
+
+Why this matters: if `geminiClient.js` ever imports something from `contextBuilder.js`, you'd have a circular dependency (`A imports B, B imports A`), which causes `undefined` errors in ES Modules at runtime.
+
+---
+
+**❌ Wrong: `index.js` used `buildPrompt` (the wrong function, now deleted)**
+
+```js
+import { buildPrompt } from './src/contextBuilder.js';
+// ...
+prompt: buildPrompt(userInput),
+```
+
+`buildPrompt` used a generic researcher prompt without any ReAct format instructions. The model would respond in free-text prose — not the structured `Thought/Action` format needed for Day 1.
+
+**✅ Fixed: Switch to `buildPromptWithTools`**
+
+```js
+import { buildPromptWithTools } from './src/contextBuilder.js';
+// ...
+prompt: {
+    system: buildPromptWithTools(),
+    message: userInput
+}
+```
+
+Now the model receives the ReAct system prompt and produces `Thought:` / `Action:` output — satisfying the Day 1 definition of done.
+
+---
+
 ## Bug Log
 
 | # | File | Bug | Severity | Status |
 |---|---|---|---|---|
-| 1 | `index.js` | `SIGINT` handler indented inside `run()` body — misleading scope | Low | ⚠️ Cosmetic (works, confusing) |
+| 1 | `index.js` | `SIGINT` handler indented inside `run()` body — misleading scope | Low | ⚠️ Cosmetic (works) |
 | 2 | `index.js` | `rl.on("close")` registered after `run()` call | Low | ⚠️ Cosmetic (works) |
-| 3 | `geminiClient.js` | Default model `gemini-3-flash-preview` does not exist | **High** | ❌ Will fail at runtime |
-| 4 | `geminiClient.js` | `config` parameter shadows `config` import from dotenv | Medium | ⚠️ Latent / code smell |
-| 5 | `geminiClient.js` | `config.maxTokens` doesn't match `maxOutputTokens` from caller | Medium | ❌ Caller value silently ignored |
+| 3 | `geminiClient.js` | Default model name was incorrect | High | ✅ Acknowledged — user confirmed working model from docs |
+| 4 | `geminiClient.js` | `config.maxTokens` ≠ `maxOutputTokens` from caller | Medium | ✅ Fixed — changed to `config.maxOutputTokens` |
+| 5 | `contextBuilder.js` | Dead import of `geminiClient.js` — circular dep risk | Medium | ✅ Fixed — import deleted |
+| 6 | `index.js` | Used `buildPrompt` instead of `buildPromptWithTools` | High | ✅ Fixed — swapped to correct function |
 
 ---
 
