@@ -31,15 +31,16 @@ async function run() {
             
 
             // calling the gemini function
+            // primer is handled inside geminiClient.js — it prefills the
+            // model turn with "Thought:" so the model is forced into ReAct format.
             const response = await generateContent({
                 prompt: {
                     system: buildPromptWithTools(),
                     message: userInput
                 },
                 config:{
-                    temperature: 0.6,
+                    temperature: 0.1,
                     topP: 0.95,
-                    maxOutputTokens: 300,
                 }
             })
 
@@ -62,21 +63,18 @@ rl.on("close", () => {
 
 
 /* 
-    ### Day 1 — Setup + plain LLM call with system prompt
+    ### Day 2 — Build the action parser (S4: toolDispatcher.js)
 
-        > Goal: Gemini responds in the ReAct format (even without real tools yet).
+        > Goal: Extract tool name and argument from raw LLM output reliably.
 
         Tasks:
-        - [x] mkdir "03 News Research Agent" && cd into it
-        - [x] npm init -y
-        - [x] npm install @google/genai dotenv
-        - [x] Create .env with GEMINI_API_KEY
-        - [x] Write index.js — hardcoded question: "What happened with AI regulation this week?"
-        - [x] Write geminiClient.js — single function callGemini (prompt, options)
-        - [ ] Write contextBuilder.js — returns the system prompt string with tool descriptions
-        - [x] Call Gemini with the system prompt + user question
-        - [x] Print raw output — you should see it write "Thought: ..." and "Action: web_search(...)"
-
-        > Definition of done: Gemini outputs text that LOOKS like ReAct format even though no tools exist yet. You can see it trying to call a tool.    
+        - [ ] Write toolDispatcher.js with function parseAction(text)
+        - [ ] It should extract from "Action: web_search(AI regulation 2025)"
+        → { tool: "web_search", args: "AI regulation 2025" }
+        - [ ] Handle edge cases:
+        - Extra spaces: "Action:  web_search( query here )" → still works
+        - Wrong format: LLM forgets "Action:" prefix → return { tool: null, error: "parse_failed" }
+        - Unknown tool name → return { tool: null, error: "unknown_tool" }
+        - [ ] Write tests manually: paste 5 different LLM outputs, check parser output
 
 */

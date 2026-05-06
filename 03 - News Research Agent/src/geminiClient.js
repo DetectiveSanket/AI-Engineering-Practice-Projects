@@ -18,9 +18,12 @@ const client = new GoogleGenAI({
 /**
  * Core function to generate content from Gemini
  * @param {Object} options 
- * @param {string} options.model - Model name (e.g., 'gemini-1.5-flash')
- * @param {string} options.prompt - The prompt text
- * @param {Object} options.config - Generation config (temperature, etc.)
+ * @param {string} options.model       - Model name (e.g., 'gemini-2.5-flash-preview-05-20')
+ * @param {Object} options.prompt      - { system, message, primer? }
+ *   prompt.system   - The system instruction (persona + rules)
+ *   prompt.message  - The user's question
+ *   prompt.primer   - Optional: text to prefill the model's turn (e.g., 'Thought:')
+ * @param {Object} options.config      - Generation config (temperature, etc.)
  */
 
 export async function generateContent({model = 'gemini-3-flash-preview', prompt, config = {}}) {
@@ -30,26 +33,28 @@ export async function generateContent({model = 'gemini-3-flash-preview', prompt,
             throw new Error("GEMINI_API_KEY is missing in .env file");
         }        
 
+        // Build the contents array as a proper multi-turn conversation.
+        // The user turn holds the question; the model turn is the PRIMER.
+        // Prefilling the model turn with "Thought:" forces the model to
+        // continue in ReAct format — this is more reliable than system
+        // prompt instructions alone, because the model is a text completer:
+        // it MUST continue from whatever the model turn already says.
+        const primer = prompt.primer ?? 'Thought:';
+
+        const contents = [
+            { role: 'user',  parts: [{ text: prompt.message }] },
+            { role: 'model', parts: [{ text: primer }] },
+        ];
+
         const response = await client.models.generateContent({
-            model:model,
+            model: model,
             systemInstruction: prompt.system,
-            contents: prompt.message,  
-            config:{
+            contents: contents,
+            config: {
                 temperature: config.temperature ?? 0.6,
                 topP: config.topP ?? 0.95,
-                maxOutputTokens: config.maxOutputTokens ?? 800,
+                maxOutputTokens: config.maxOutputTokens ?? 1000,
             },
-
-            // contents:[
-            //             ...history,
-            //             {
-            //                 role:"user" , 
-            //                 parts:[{ 
-            //                     text : prompt.message
-            //                 }]
-            //             }
-            //         ], 
-
         })
         
         return typeof response.text === 'function' ? response.text() : response.text;

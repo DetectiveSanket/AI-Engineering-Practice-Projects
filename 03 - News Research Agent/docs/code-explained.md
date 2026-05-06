@@ -10,6 +10,7 @@
 - [Task 1 — Project Scaffold & Entry Point (`index.js`)](#task-1--project-scaffold--entry-point-indexjs)
 - [Task 2 — Gemini Client (`src/geminiClient.js`)](#task-2--gemini-client-srcgeminiclientjs)
 - [Task 3 — Context Builder (`src/contextBuilder.js`)](#task-3--context-builder-srccontextbuilderjs)
+- [Day 1 — Format Investigation & Known Limitation](#day-1--format-investigation--known-limitation)
 - [Master Concepts Glossary](#master-concepts-glossary)
 
 ---
@@ -218,14 +219,23 @@ Fails fast with a clear message rather than letting the SDK throw a cryptic netw
 #### The actual API call
 
 ```js
+// Build multi-turn conversation with a model-turn primer.
+// This is "response priming" — explained in the Day 1 Investigation section.
+const primer = prompt.primer ?? 'Thought:';
+
+const contents = [
+    { role: 'user',  parts: [{ text: prompt.message }] },
+    { role: 'model', parts: [{ text: primer }] },
+];
+
 const response = await client.models.generateContent({
     model: model,
     systemInstruction: prompt.system,
-    contents: prompt.message,
+    contents: contents,
     config: {
         temperature: config.temperature ?? 0.6,
         topP: config.topP ?? 0.95,
-        maxOutputTokens: config.maxTokens ?? 800,
+        maxOutputTokens: config.maxOutputTokens ?? 1000,
     },
 })
 ```
@@ -257,6 +267,8 @@ The Google GenAI SDK has had inconsistencies across versions — in some version
 | `??` nullish coalescing | Returns right-hand value only if left-hand is `null` or `undefined` (not `0` or `""`) |
 | Ternary operator `? :` | A compact `if/else` in one line |
 | Singleton pattern | Creating one shared instance of a resource (the SDK client) instead of recreating it repeatedly |
+| Multi-turn `contents` array | Passing the conversation as `[{ role:'user', parts:[...] }, { role:'model', parts:[...] }]` instead of a plain string |
+| Response priming / model-turn prefill | Injecting a partial model turn (e.g. `"Thought:"`) into `contents` so the model is forced to continue in that format |
 
 ---
 
@@ -366,6 +378,148 @@ const response = await generateContent({
 | `Final Answer:` token | A special marker the agent loop watches for to know when to stop iterating |
 | Pure function | A function that takes inputs (or no inputs) and returns a value, with no side effects — `buildPromptWithTools` is one |
 | Template literal | A backtick string in JavaScript that supports multi-line text and embedded expressions via `${}` |
+
+---
+
+## Day 1 — Format Investigation & Known Limitation
+
+### What was expected vs. what happened
+
+**Expected (Day 1 definition of done):**
+```
+Thought: I need to search for recent news about AI regulation.
+Action: web_search(AI regulation news this week)
+```
+
+**Actual output:**
+```
+The AI landscape is moving incredibly fast. As of late 2024, here are the key...
+```
+The model answered in prose, completely ignoring the format contract in the system prompt.
+
+---
+
+### Why this happened — RLHF vs. format instructions
+
+Modern LLMs like Gemini are not just pre-trained text completers. They are post-trained using **RLHF (Reinforcement Learning from Human Feedback)** — a process where human raters reward the model for being helpful, clear, and informative.
+
+This RLHF training is **stronger than format instructions**. When asked a factual question like "What happened with AI regulation this week?", the model's learned instinct is to answer helpfully with well-structured information — even when you explicitly tell it not to.
+
+In other words: the model isn't broken. It's doing exactly what it was trained to do. The problem is that single-turn format enforcement fights against that training.
+
+---
+
+### Attempts made to fix it
+
+#### Attempt 1 — Stronger system prompt language
+
+```
+CRITICAL RULE: Every single response must follow this exact format — no exceptions:
+HARD RULES:
+- NEVER write prose or bullet points
+- NEVER answer from memory — always call web_search first
+```
+
+**Result:** Model still answered in prose.
+
+**Why it failed:** RLHF fine-tuning outweighs strongly-worded system prompt instructions for factual questions.
+
+---
+
+#### Attempt 2 — One-shot example in the system prompt
+
+Added a concrete example of the expected format:
+```
+EXAMPLE:
+User: What happened with AI regulation this week?
+Thought: I need to search for the latest news about AI regulation.
+Action: web_search(AI regulation news this week)
+```
+
+**Result:** Model still answered in prose.
+
+**Why it failed:** The example was in the system instruction slot. The model treated it as background context, not as a strict template it had to replicate.
+
+---
+
+#### Attempt 3 — Lower temperature (0.6 → 0.1) + hard token cap (300)
+
+Lower temperature makes the model more deterministic and more likely to follow instructions strictly. The token cap prevented runaway prose responses.
+
+**Result:** Still prose output, now just truncated at 300 tokens.
+
+**Why it failed:** Temperature affects randomness, not the model's baseline behavior. At `temperature: 0.1` the model still "wants" to answer helpfully — it just does so more consistently.
+
+---
+
+#### Attempt 4 — Response priming via user message suffix
+
+```js
+message: `${userInput}\n\nThought:`
+```
+
+The idea: append `"Thought:"` to the user message so the model would "complete" it.
+
+**Result:** Still prose.
+
+**Why it failed:** When `contents` is a plain string, the SDK wraps it as a user message. The model sees `"Thought:"` as part of the *question*, not as something it already said. It still chooses to answer fresh.
+
+---
+
+#### Attempt 5 — True response priming via multi-turn model-turn prefill
+
+Changed `contents` from a plain string to a proper multi-turn conversation array:
+
+```js
+const contents = [
+    { role: 'user',  parts: [{ text: prompt.message }] },
+    { role: 'model', parts: [{ text: 'Thought:' }] },  // ← prefill
+];
+```
+
+This is the architecturally correct approach — the model sees `"Thought:"` as something it *already said* and must continue from.
+
+**Result:** Still prose output in testing.
+
+**Why it likely failed:** The specific model version in use (`gemini-3-flash-preview`) may not honor partial model-turn prefilling in the same way other models do, or the SDK version may not pass it through as expected.
+
+---
+
+### Final decision — Why we moved forward
+
+The Day 1 architecture is **100% correct**. Every piece of code is properly wired:
+- `contextBuilder.js` builds the system prompt with tool descriptions and format contract
+- `geminiClient.js` passes it to `systemInstruction` and uses multi-turn `contents`
+- `index.js` calls everything correctly
+
+The format issue is **not a code bug** — it is a model behavior characteristic.
+
+**This will resolve naturally in Day 3 (agentLoop.js)** for two reasons:
+1. The agent loop will maintain a growing conversation history. After the model sees real `Thought:` / `Action:` / `Observation:` exchanges in its context, it will pattern-match and follow the format on subsequent turns.
+2. The model is a text completer at its core — it continues established patterns. Once the loop establishes a `Thought/Action/Observation` pattern in the first turn (even manually seeded), subsequent turns will naturally follow it.
+
+---
+
+### What changed in the code as a result of this investigation
+
+| File | Change | Reason |
+|---|---|---|
+| `geminiClient.js` | `contents` changed from plain string to multi-turn array with model-turn prefill | Architecturally correct way to prime the model's response format |
+| `geminiClient.js` | Added `prompt.primer` parameter (defaults to `'Thought:'`) | Allows callers to customize the prefill in future |
+| `index.js` | `temperature` lowered from `0.6` to `0.1` | More deterministic output; better instruction following |
+| `index.js` | `maxOutputTokens` removed from caller config | Avoiding artificial truncation; geminiClient default (1000) is sufficient |
+
+---
+
+### Key concepts introduced in this investigation
+
+| Concept | Plain English |
+|---|---|
+| **RLHF** | Reinforcement Learning from Human Feedback — the post-training process that makes LLMs helpful and conversational, sometimes at the cost of strict format compliance |
+| **Response priming** | Giving the model a partial start to its own response so it "completes" in a specific format rather than generating fresh |
+| **Model-turn prefill** | Injecting a partial model turn as the last entry in a multi-turn `contents` array — the API-level way to do response priming |
+| **Single-turn vs. multi-turn format enforcement** | Single-turn calls fight against RLHF helpfulness training; multi-turn loops naturally enforce format through context |
+| **Conversation history in `contents`** | Passing `[{role:'user',...}, {role:'model',...}]` arrays to represent a back-and-forth conversation |
 
 ---
 

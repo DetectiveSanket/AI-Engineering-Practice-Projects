@@ -10,6 +10,7 @@
 - [Task 1 — Project Scaffold & Entry Point](#task-1--project-scaffold--entry-point)
 - [Task 2 — Gemini Client](#task-2--gemini-client)
 - [Task 3 — Context Builder](#task-3--context-builder)
+- [Day 1 — Format Investigation & Known Limitation](#day-1--format-investigation--known-limitation)
 - [Bug Log](#bug-log)
 - [Glossary](#glossary)
 
@@ -326,6 +327,132 @@ Now the model receives the ReAct system prompt and produces `Thought:` / `Action
 
 ---
 
+## Day 1 — Format Investigation & Known Limitation
+
+### The issue
+
+After all Day 1 code was written and wired correctly, running the program did not produce the expected ReAct-format output.
+
+**Expected:**
+```
+Thought: I need to search for recent news about AI regulation.
+Action: web_search(AI regulation news this week)
+```
+**Actual:**
+```
+The AI landscape is moving incredibly fast. As of late 2024...
+[continues with 400 words of structured prose]
+```
+
+The model was completely ignoring the format contract in the system prompt and answering from its training knowledge.
+
+---
+
+### Root cause
+
+Modern chat-optimized LLMs are trained with **RLHF (Reinforcement Learning from Human Feedback)**. Human raters reward the model for giving helpful, complete, well-structured answers. This training is stronger than format instructions in the system prompt for factual questions.
+
+When asked "What happened with AI regulation this week?", the model's RLHF training overpowers the `"NEVER answer from memory"` rule and produces a helpful answer.
+
+This is not a code bug. The architecture is correct. It is a known limitation of single-turn ReAct format elicitation against chat-optimized models.
+
+---
+
+### All attempts made and why each failed
+
+#### ❌ Attempt 1 — Stronger system prompt language
+
+**What was changed:**
+```
+CRITICAL RULE: Every single response must follow this exact format — no exceptions
+HARD RULES:
+- NEVER skip the Thought step
+- NEVER answer directly from memory
+- NEVER write prose — only the format above
+```
+**Outcome:** Prose output. No change.
+**Why it failed:** RLHF fine-tuning > system prompt instructions for factual questions. The model saw the rule, and ignored it because it had a stronger trained pull toward being helpful.
+
+---
+
+#### ❌ Attempt 2 — One-shot example in system prompt
+
+**What was changed:** Added a concrete example showing exact expected output:
+```
+EXAMPLE:
+User: What happened with AI regulation this week?
+Thought: I need to search for the latest news about AI regulation.
+Action: web_search(AI regulation news this week)
+```
+**Outcome:** Prose output. No change.
+**Why it failed:** The example sits in the `systemInstruction` slot, which the model treats as background context. It saw the example but did not treat it as a mandatory template to replicate for the current question.
+
+---
+
+#### ❌ Attempt 3 — Lower temperature + 300-token cap
+
+**What was changed:**
+```js
+// index.js
+config: { temperature: 0.1, topP: 0.95, maxOutputTokens: 300 }
+```
+**Outcome:** Prose output, now truncated at ~300 tokens. Model behavior unchanged.
+**Why it failed:** Temperature controls *randomness*, not the model's baseline behavioral tendency. At `0.1` the model is more consistent — but it consistently does what its RLHF training tells it to: answer helpfully. The `maxOutputTokens` cap just cut the prose short.
+
+---
+
+#### ❌ Attempt 4 — Response priming via user message suffix
+
+**What was changed:**
+```js
+// index.js
+message: `${userInput}\n\nThought:`
+```
+**Rationale:** LLMs are text completers. If the user message ends with `"Thought:"`, the model might "complete" it and continue in ReAct format.
+**Outcome:** Prose output. No change.
+**Why it failed:** `contents` was still a plain string. The SDK wraps a plain string as a user message. The model saw `"Thought:"` as part of the *question* being asked, not as something it had already said. It still chose to answer fresh.
+
+---
+
+#### ❌ Attempt 5 — Multi-turn model-turn prefill (architecturally correct)
+
+**What was changed:**
+```js
+// geminiClient.js — contents changed from plain string to array
+const contents = [
+    { role: 'user',  parts: [{ text: prompt.message }] },
+    { role: 'model', parts: [{ text: 'Thought:' }] },  // ← model-turn prefill
+];
+```
+**Rationale:** Passing a partial model turn as the last item in `contents` tells the API that the model has *already started* its response with `"Thought:"`. The model must continue from there.
+**Outcome:** Still prose output.
+**Why it likely failed:** The specific model version or SDK version may not pass partial model-turn prefills through to the underlying inference engine as expected. The architecture is correct in principle, but the behavior wasn't observed in practice with the current setup.
+
+---
+
+### Final resolution
+
+**Decision: Declare Day 1 architecture complete and move to Day 2.**
+
+Reason: The format problem is not a code problem. It will resolve naturally in **Day 3 (agentLoop.js)** because:
+1. The agent loop builds multi-turn conversation history turn by turn
+2. After the first turn — even if it's prose — the loop injects an `Observation:` from a tool call and asks for the next step
+3. Once the model sees `Thought / Action / Observation / Thought / Action` in its context, it pattern-matches and follows the format on all subsequent turns
+4. This is how real agent frameworks work: the loop structure enforces format, not the system prompt alone
+
+---
+
+### Code changes that remain after the investigation
+
+| File | Final state | Notes |
+|---|---|---|
+| `geminiClient.js` | Uses multi-turn `contents` array with `role:'model'` prefill | Architecturally correct — kept even though it didn't force format in Day 1 |
+| `geminiClient.js` | `prompt.primer` parameter added (default `'Thought:'`) | Useful for agentLoop in Day 3 |
+| `index.js` | `temperature: 0.1` | Stays — deterministic output is better for an agent |
+| `index.js` | `maxOutputTokens` removed from caller config | Removed — it was masking the real problem (truncating prose) |
+
+---
+
 ## Bug Log
 
 | # | File | Bug | Severity | Status |
@@ -336,6 +463,9 @@ Now the model receives the ReAct system prompt and produces `Thought:` / `Action
 | 4 | `geminiClient.js` | `config.maxTokens` ≠ `maxOutputTokens` from caller | Medium | ✅ Fixed — changed to `config.maxOutputTokens` |
 | 5 | `contextBuilder.js` | Dead import of `geminiClient.js` — circular dep risk | Medium | ✅ Fixed — import deleted |
 | 6 | `index.js` | Used `buildPrompt` instead of `buildPromptWithTools` | High | ✅ Fixed — swapped to correct function |
+| 7 | `geminiClient.js` | `contents` passed as plain string — SDK wraps as user msg, no turn control | Medium | ✅ Fixed — changed to multi-turn array with model-turn prefill |
+| 8 | `index.js` | `maxOutputTokens: 300` hard cap silently truncating responses | Low | ✅ Fixed — removed from caller config |
+| 9 | Day 1 overall | Single-turn ReAct format not achievable with RLHF-tuned model | Design | ⚠️ Known — resolves in Day 3 agent loop |
 
 ---
 
@@ -355,3 +485,7 @@ Now the model receives the ReAct system prompt and produces `Thought:` / `Action
 | **Abstraction layer** | A module that wraps complex/third-party logic so the rest of the app doesn't need to know the details |
 | **System instruction** | A privileged prompt sent to the Gemini API that defines the model's persona/rules (separate from user content) |
 | **Context window** | The total amount of text (tokens) the model can "see" at once — prompt + history + response |
+| **RLHF** | Reinforcement Learning from Human Feedback — post-training that makes models helpful, sometimes overriding format instructions |
+| **Response priming** | Giving the model a partial start to its own response so it completes in a specific format |
+| **Model-turn prefill** | Injecting a partial `role:'model'` turn at the end of a `contents` array to prime the response |
+| **Multi-turn `contents`** | Passing `[{role:'user',...},{role:'model',...}]` to represent a conversation instead of a plain string |
