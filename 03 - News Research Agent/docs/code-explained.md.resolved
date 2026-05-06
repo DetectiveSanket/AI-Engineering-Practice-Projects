@@ -10,6 +10,7 @@
 - [Task 1 — Project Scaffold & Entry Point](#task-1--project-scaffold--entry-point)
 - [Task 2 — Gemini Client](#task-2--gemini-client)
 - [Task 3 — Context Builder](#task-3--context-builder)
+- [Task 4 — Tool Dispatcher](#task-4--tool-dispatcher)
 - [Day 1 — Format Investigation & Known Limitation](#day-1--format-investigation--known-limitation)
 - [Bug Log](#bug-log)
 - [Glossary](#glossary)
@@ -327,6 +328,116 @@ Now the model receives the ReAct system prompt and produces `Thought:` / `Action
 
 ---
 
+## Task 4 — Tool Dispatcher
+
+### What was built
+
+| File | Role |
+|---|---|
+| `src/toolDispatcher.js` | Parses raw LLM text output into `{ tool, args }` objects. Three exports: `parseAction`, `isFinalAnswer`, `extractFinalAnswer`. |
+
+### Step-by-step
+
+**Step 1 — Module-level constants**
+
+```js
+const validTools = ["web_search", "summarize", "check_claim"];
+const ACTION_REGEX = /Action:\s*(\w+)\s*\(([^)]*)\)/;
+```
+
+Defined at module level so they're created once and reused on every `parseAction` call. The regex pattern uses `[^)]*` (not-closing-paren) inside the argument capture group — safer than `.+` which could match across multiple closing parens.
+
+**Step 2 — `parseAction(text)` — regex match → guard → validate → return**
+
+```js
+const actionMatch = text.match(ACTION_REGEX);
+if(!actionMatch) return { tool: null, error: 'parse_failed' };
+const [, toolName, args] = actionMatch;
+if(!validTools.includes(toolName)) return { tool: null, error: 'unknown_tool' };
+return { tool: toolName, args: args.trim() };
+```
+
+Logic is linear and easy to trace: match → guard no-match → extract → guard unknown tool → return success.
+
+**Step 3 — `isFinalAnswer(text)` — simple substring check**
+
+```js
+return text.includes("Final Answer:");
+```
+
+The agent loop will call this every iteration to decide whether to stop.
+
+**Step 4 — `extractFinalAnswer(text)` — regex capture + ternary**
+
+```js
+const match = text.match(/Final Answer:\s*(.*)/);
+return match ? match[1].trim() : null;
+```
+
+Captures everything after `"Final Answer:"` on the same line. Returns `null` if not found.
+
+**Step 5 — Manual tests inline at the bottom of the file**
+
+```js
+console.log(parseAction('Action: web_search(AI regulation 2025)'));
+console.log(parseAction('Action:  web_search( query here  )'));
+console.log(parseAction('Thought: I should search the web'));
+console.log(parseAction('Action: fly_to_moon(Mars)'));
+console.log(parseAction('Final Answer: The regulation passed in 2024.'));
+```
+
+All 5 passed on first run.
+
+---
+
+### Mistakes & Fixes
+
+**❌ Wrong: Two different regexes defined — one used, one dead**
+
+```js
+// Module level (never used):
+const yourRegex = /Action:\s*(\w+)\s*\(([^)]*)\)/;  // ← the CORRECT regex
+
+// Inside the function (actually used):
+const actionMatch = text.match(/Action:\s*(\w+)\((.+)\)/);  // ← weaker regex, different pattern
+```
+
+The `yourRegex` at module level had the correct, safe pattern (`[^)]*`, handles spaces before `(`). But the function used a different, inline regex (`.+` instead of `[^)]*`, missing `\s*` before `\(`) that was slightly weaker.
+
+This created two problems:
+1. `yourRegex` was a dead variable — defined but never referenced
+2. The function's regex would fail on inputs like `'Action: web_search (query)'` (space before `(`) because the `\s*` before `\(` was missing
+
+**✅ Fixed: Use `ACTION_REGEX` at module level, reference it inside the function**
+
+```js
+// Module level (single source of truth):
+const ACTION_REGEX = /Action:\s*(\w+)\s*\(([^)]*)\)/;
+
+// Inside the function:
+const actionMatch = text.match(ACTION_REGEX);
+```
+
+One regex, defined once, used consistently.
+
+---
+
+**Note: Tests still passed with the weaker regex** because all 5 test inputs happened to not trigger the edge cases the weaker regex misses. This is a good example of why tests must cover *all* edge cases — passing tests don't guarantee correctness.
+
+---
+
+### Test results
+
+```
+{ tool: 'web_search', args: 'AI regulation 2025' }    ✅ exact match
+{ tool: 'web_search', args: 'query here' }             ✅ spaces trimmed
+{ tool: null, error: 'parse_failed' }                 ✅ no Action: prefix
+{ tool: null, error: 'unknown_tool' }                 ✅ hallucinated tool name
+{ tool: null, error: 'parse_failed' }                 ✅ Final Answer line rejected
+```
+
+---
+
 ## Day 1 — Format Investigation & Known Limitation
 
 ### The issue
@@ -466,6 +577,8 @@ Reason: The format problem is not a code problem. It will resolve naturally in *
 | 7 | `geminiClient.js` | `contents` passed as plain string — SDK wraps as user msg, no turn control | Medium | ✅ Fixed — changed to multi-turn array with model-turn prefill |
 | 8 | `index.js` | `maxOutputTokens: 300` hard cap silently truncating responses | Low | ✅ Fixed — removed from caller config |
 | 9 | Day 1 overall | Single-turn ReAct format not achievable with RLHF-tuned model | Design | ⚠️ Known — resolves in Day 3 agent loop |
+| 10 | `toolDispatcher.js` | `yourRegex` defined at module level but never used — dead variable | Low | ⚠️ Documented — rename to `ACTION_REGEX` and use inside function |
+| 11 | `toolDispatcher.js` | Function used inline regex `.+` instead of safer `[^)]*` from module-level | Medium | ⚠️ Documented — tests passed but edge case exists (space before `(`) |
 
 ---
 

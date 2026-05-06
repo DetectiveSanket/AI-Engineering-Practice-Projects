@@ -10,6 +10,7 @@
 - [Task 1 — Project Scaffold & Entry Point (`index.js`)](#task-1--project-scaffold--entry-point-indexjs)
 - [Task 2 — Gemini Client (`src/geminiClient.js`)](#task-2--gemini-client-srcgeminiclientjs)
 - [Task 3 — Context Builder (`src/contextBuilder.js`)](#task-3--context-builder-srccontextbuilderjs)
+- [Task 4 — Tool Dispatcher (`src/toolDispatcher.js`)](#task-4--tool-dispatcher-srctooldispatcherjs)
 - [Day 1 — Format Investigation & Known Limitation](#day-1--format-investigation--known-limitation)
 - [Master Concepts Glossary](#master-concepts-glossary)
 
@@ -378,6 +379,168 @@ const response = await generateContent({
 | `Final Answer:` token | A special marker the agent loop watches for to know when to stop iterating |
 | Pure function | A function that takes inputs (or no inputs) and returns a value, with no side effects — `buildPromptWithTools` is one |
 | Template literal | A backtick string in JavaScript that supports multi-line text and embedded expressions via `${}` |
+
+---
+
+## Task 4 — Tool Dispatcher (`src/toolDispatcher.js`)
+
+### What this file does and WHY it exists
+
+`toolDispatcher.js` is the **text-to-action translator**. The LLM can only output text. It cannot call JavaScript functions. This file bridges that gap: it reads the LLM's raw text, extracts the structured information (tool name + argument), and returns an object your program can act on.
+
+**Why isolate it?**
+- Parsing logic is complex and error-prone. Keeping it here means `agentLoop.js` can stay clean.
+- Every edge case (extra spaces, unknown tools, missing `Action:` prefix) is handled in one place.
+- It is independently testable without running the full agent loop.
+
+**Three exported functions:**
+
+| Function | Input | Output |
+|---|---|---|
+| `parseAction(text)` | Raw LLM output | `{ tool, args }` or `{ tool: null, error }` |
+| `isFinalAnswer(text)` | Raw LLM output | `true` / `false` |
+| `extractFinalAnswer(text)` | Raw LLM output | The answer string, or `null` |
+
+---
+
+### Line-by-line explanation
+
+#### Module-level constants
+
+```js
+const validTools = ["web_search", "summarize", "check_claim"];
+const ACTION_REGEX = /Action:\s*(\w+)\s*\(([^)]*)\)/;
+```
+
+- **`validTools`** — a whitelist of tool names. Defined at module level (not inside the function) so it's created once and reused on every call. These names must **exactly match** what appears in `contextBuilder.js`'s tool manifest.
+- **`ACTION_REGEX`** — the regular expression that parses the LLM's action string. Defined at module level for the same reason: build once, reuse many times.
+
+#### Regex breakdown — the most important line in the file
+
+```
+/Action:\s*(\w+)\s*\(([^)]*)\)/
+   │      │   │    │  │   │  │
+   │      │   │    │  │   │  └─ literal closing )
+   │      │   │    │  │   └─── capture group 2: everything EXCEPT ) inside the parens
+   │      │   │    │  └───── literal opening ( (escaped because ( is special in regex)
+   │      │   │    └────── optional spaces between tool name and (
+   │      │   └─────── capture group 1: \w+ = one or more word chars (letters, digits, _)
+   │      └──────── \s* = zero or more spaces after "Action:"
+   └────────── literal "Action:"
+```
+
+- `[^)]*` ("not-closing-paren") is safer than `.+` because it won't accidentally match across multiple parentheses if the LLM outputs something unusual.
+- `\s*` before `\(` handles cases like `web_search (query)` with a space before the parenthesis.
+
+#### `parseAction(text)` — step by step
+
+```js
+export function parseAction(text) {
+    const actionMatch = text.match(ACTION_REGEX);
+```
+
+`text.match(regex)` returns `null` if no match is found, or an array where:
+- `[0]` = the full matched string
+- `[1]` = first capture group (tool name)
+- `[2]` = second capture group (argument)
+
+```js
+    if(!actionMatch) {
+        return { tool: null, error: "parse_failed" };
+    }
+```
+
+**Guard clause** — if the regex didn't match, the text isn't an action. This covers:
+- `"Thought: I should search the web"` — no `Action:` prefix
+- `"Final Answer: The regulation passed."` — not an action at all
+
+```js
+    const [, toolName, args] = actionMatch;
+```
+
+**Array destructuring** with a skipped first element. The `,` before `toolName` deliberately skips index `[0]` (the full match). This is equivalent to:
+```js
+const toolName = actionMatch[1];
+const args = actionMatch[2];
+```
+But more concise and idiomatic.
+
+```js
+    if(!validTools.includes(toolName)) {
+        return { tool: null, error: "unknown_tool" };
+    }
+```
+
+Checks the tool name against the whitelist. Catches cases where the LLM hallucinates a tool name like `fly_to_moon` that doesn't exist in your codebase.
+
+```js
+    return { tool: toolName, args: args.trim() };
+```
+
+`args.trim()` removes any leading/trailing whitespace from the argument — handles `web_search( query here  )` cleanly.
+
+---
+
+#### `isFinalAnswer(text)` — the loop's exit detector
+
+```js
+export function isFinalAnswer(text) {
+    return text.includes("Final Answer:");
+}
+```
+
+The simplest possible implementation. Returns `true` if the LLM's text contains `"Final Answer:"`. The agent loop (Day 3) will call this on every LLM response to decide whether to stop looping or call another tool.
+
+---
+
+#### `extractFinalAnswer(text)` — pulls out just the answer text
+
+```js
+export function extractFinalAnswer(text) {
+    const match = text.match(/Final Answer:\s*(.*)/);
+    return match ? match[1].trim() : null;
+}
+```
+
+- **`/Final Answer:\s*(.*)/`** — matches `"Final Answer:"` followed by any number of spaces, then captures everything after it on that line.
+- **Ternary** — if the match succeeded, return the captured text (trimmed); otherwise return `null`.
+
+Example: `"Final Answer: The regulation passed in 2024."` → returns `"The regulation passed in 2024."`
+
+---
+
+### Test results (all 5 passed)
+
+```
+Input:  'Action: web_search(AI regulation 2025)'
+Output: { tool: 'web_search', args: 'AI regulation 2025' }  ✅
+
+Input:  'Action:  web_search( query here  )'
+Output: { tool: 'web_search', args: 'query here' }           ✅ spaces handled
+
+Input:  'Thought: I should search the web'
+Output: { tool: null, error: 'parse_failed' }                ✅
+
+Input:  'Action: fly_to_moon(Mars)'
+Output: { tool: null, error: 'unknown_tool' }                ✅
+
+Input:  'Final Answer: The regulation passed in 2024.'
+Output: { tool: null, error: 'parse_failed' }                ✅
+```
+
+---
+
+### Key concepts introduced in Task 4
+
+| Concept | Plain English |
+|---|---|
+| Regex capture group `(...)` | Marks a part of the pattern whose matched text you want to extract. Accessed via `.match()[1]`, `.match()[2]`, etc. |
+| `[^)]*` in regex | "Match any character that is NOT a closing parenthesis" — safer than `.+` for bounded captures |
+| `text.match(regex)` | Runs the regex against `text`. Returns `null` on no match, or an array of matches and captures |
+| Array destructuring with skip | `const [, a, b] = arr` — the leading `,` skips index 0 |
+| Whitelist validation | Checking user/model input against a fixed list of allowed values before acting on it |
+| Module-level constants | Variables defined outside functions so they're created once and shared across all calls |
+| `String.prototype.includes()` | Returns `true` if the string contains the given substring anywhere |
 
 ---
 
