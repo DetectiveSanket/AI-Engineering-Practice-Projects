@@ -3,7 +3,7 @@ import * as readline from 'node:readline/promises';
 import { stdin as input, stdout as output } from 'node:process'; 
 import { buildPromptWithTools } from './src/contextBuilder.js';
 // import { webSearch } from './tools/webSearch.js';
-
+import { runAgent } from './src/agentLoop.js';
 
 const rl = readline.createInterface({ input, output });
 
@@ -34,23 +34,25 @@ async function run() {
             // calling the gemini function
             // primer is handled inside geminiClient.js — it prefills the
             // model turn with "Thought:" so the model is forced into ReAct format.
-            const response = await generateContent({
-                prompt: {
-                    system: buildPromptWithTools(),
-                    message: userInput
-                },
-                config:{
-                    temperature: 0.1,
-                    topP: 0.95,
-                }
-            })
+            // const response = await generateContent({
+            //     prompt: {
+            //         system: buildPromptWithTools(),
+            //         message: userInput
+            //     },
+            //     config:{
+            //         temperature: 0.1,
+            //         topP: 0.95,
+            //     }
+            // })
+
+
+            // True AI Agent call
+            const agentResponse = await runAgent(userInput);
 
         
             
             console.log('  **************************************************************');
-            console.log(" AI Response :- " , response);
-
-
+            console.log(" AI Response :- " , agentResponse);
             console.log('  **************************************************************');
 
 
@@ -68,18 +70,25 @@ rl.on("close", () => {
 
 
 /* 
-    ### Day 3 — First real tool: webSearch() (S5)
-        Goal: The agent can actually search for news.
+    ### Day 4 — Build the core ReAct loop (S3: agentLoop.js)
 
-    Get NewsAPI free key: https://newsapi.org — free tier, 100 requests/day.
+        > Goal: The loop runs. Agent thinks, calls web_search, sees result, loops again.
 
-    Tasks:
-    - [ ] npm install axios - done
-    - [ ] Add NEWS_API_KEY to .env - done
-    - [ ] Write tools/webSearch.js — function webSearch(query) - done
-    - [ ] Call NewsAPI /everything endpoint with the query - done
-    - [ ] Return structured result: array of { title, description, url, publishedAt } -- done
-    - [ ] Cap at top 3 results to keep context short - done  
-    - [ ] Add fallback: if API fails, return mock result (so the agent loop still runs) - done
+        This is the most important file in the project. Take your time on it.
+
+        Tasks:
+        - [ ] Write agentLoop.js — async function runAgent(question) - done
+        - [ ] Maintain a messages array (conversation history) - done
+        - [ ] Each iteration: - done
+        1. Call Gemini with full messages array
+        2. Append assistant response to messages
+        3. Check: is it "Final Answer:"? → return answer, exit
+        4. Check: is it "Action:"? → parse it, run tool, get result
+        5. Append tool result as: "Observation: [result]"
+        6. Loop again
+        - [ ] Add a max steps guard (10 steps max) — prevents infinite loops - done
+        - [ ] Log every step to terminal so you can watch the agent think - done
+
+
 
 */

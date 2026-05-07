@@ -12,6 +12,8 @@
 - [Task 3 — Context Builder](#task-3--context-builder)
 - [Task 4 — Tool Dispatcher](#task-4--tool-dispatcher)
 - [Task 5 — Web Search Tool](#task-5--web-search-tool)
+- [Task 6 — Agent Loop](#task-6--agent-loop)
+- [Task 7 — Gemini Client: Multi-turn Upgrade](#task-7--gemini-client-multi-turn-upgrade)
 - [Day 1 — Format Investigation & Known Limitation](#day-1--format-investigation--known-limitation)
 - [Bug Log](#bug-log)
 - [Glossary](#glossary)
@@ -549,6 +551,176 @@ Query `"AI Agent by Anthropic?"` returned 3 real articles from NewsAPI — struc
 
 ---
 
+## Task 6 — Agent Loop
+
+### What was built
+
+| File | Role |
+|---|---|
+| `src/agentLoop.js` | The ReAct loop. Calls Gemini, parses response, runs tools, injects observations, loops until Final Answer or 10 steps. |
+
+### Step-by-step
+
+**Step 1 — Imports: all four previous modules meet here**
+```js
+import { webSearch } from '../tools/webSearch.js';
+import { generateContent } from './geminiClient.js';
+import { buildPromptWithTools } from './contextBuilder.js';
+import { parseAction, isFinalAnswer, extractFinalAnswer } from './toolDispatcher.js';
+```
+
+**Step 2 — Initialize conversation history**
+```js
+const messages = [
+    { role: 'user', parts: [{ text: userQuestion }] }
+];
+```
+One user turn. System prompt goes separately as `system:` in `generateContent`, not inside `messages`.
+
+**Step 3 — The loop: call Gemini with full history**
+```js
+const response = await generateContent({
+    prompt: { system: systemPrompt, message: messages },
+    config: { temperature: 0.2, topP: 0.95 }
+});
+```
+`messages` is an array. `geminiClient.js` now detects this and passes it directly as `contents`.
+
+**Step 4 — Push model response into history**
+```js
+messages.push({ role: 'model', parts: [{ text: response }] });
+```
+Model role name is `'model'`, not `'assistant'`.
+
+**Step 5 — Check Final Answer first**
+```js
+if (isFinalAnswer(response)) return extractFinalAnswer(response);
+```
+
+**Step 6 — Parse action with object destructuring**
+```js
+const { tool, args, error } = parseAction(response);
+```
+`parseAction` returns an object `{ tool, args }` or `{ tool: null, error }`. Must use `{ }` not `[ ]`.
+
+**Step 7 — Execute tool, build Observation, inject back**
+```js
+const result = await webSearch(args);
+Observation = JSON.stringify(result, null, 2);
+messages.push({ role: 'user', parts: [{ text: `Observation: ${Observation}` }] });
+```
+
+---
+
+### Mistakes & Fixes
+
+**❌ Wrong: Import from `../tools/toolDispatcher.js` — a new empty file**
+
+The user created a second `toolDispatcher.js` at `tools/toolDispatcher.js` with empty function stubs, while the working implementation was at `src/toolDispatcher.js`. `agentLoop.js` imported from the empty file.
+
+```js
+// Wrong:
+import { ... } from "../tools/toolDispatcher.js";  // ← empty file
+// Fixed:
+import { ... } from "./toolDispatcher.js";  // ← src/toolDispatcher.js (working)
+```
+
+**Why it was wrong:** `agentLoop.js` is in `src/`. `../tools/` goes up to the root then into `tools/` — a completely different file from `./toolDispatcher.js` which refers to `src/toolDispatcher.js`. Same filename, different directory.
+
+---
+
+**❌ Wrong: Array destructuring `[ ]` on a `parseAction` object**
+
+```js
+// Wrong:
+const [tool, args, error] = action;  // ← [ ] is for arrays
+// Fixed:
+const { tool, args, error } = parseAction(response);  // ← { } is for objects
+```
+
+**Why it was wrong:** `parseAction` returns `{ tool: 'web_search', args: '...' }` — an object. JavaScript array destructuring `[a, b, c]` works by position (index 0, 1, 2). Object destructuring `{ a, b, c }` works by key name. You cannot array-destructure an object — it throws `TypeError: action is not iterable`. This was the crash error in the terminal: `❌ action is not iterable`.
+
+---
+
+**❌ Wrong: `role: 'assistant'` instead of `role: 'model'`**
+
+```js
+// Wrong:
+messages.push({ role: 'assistant', parts: [{ text: response }] });
+// Fixed:
+messages.push({ role: 'model', parts: [{ text: response }] });
+```
+
+**Why it was wrong:** Gemini's API only accepts `'user'` and `'model'` as role values. `'assistant'` is the term used by OpenAI and Anthropic. Passing `'assistant'` to the Gemini API causes an invalid request error.
+
+---
+
+**❌ Wrong: `json.stringify` — lowercase `j`**
+
+```js
+// Wrong:
+Observation = json.stringify(result, null, 2);  // ← json is not defined
+// Fixed:
+Observation = JSON.stringify(result, null, 2);  // ← JSON is a global built-in
+```
+
+**Why it was wrong:** JavaScript is case-sensitive. The global built-in is `JSON` (uppercase). `json` (lowercase) is not defined anywhere — it throws `ReferenceError: json is not defined`.
+
+---
+
+**❌ Wrong: Two consecutive `user` turns in `messages` initialization**
+
+```js
+// Wrong:
+const messages = [
+    { role: 'user', parts: [{ text: systemPrompt }] },   // ← systemPrompt as user message
+    { role: 'user', parts: [{ text: userQuestion }] },   // ← two user turns in a row
+];
+// Fixed:
+const messages = [
+    { role: 'user', parts: [{ text: userQuestion }] }   // ← only the question
+];
+```
+
+**Why it was wrong:** The Gemini API requires strictly alternating `user` / `model` turns. Two consecutive `user` turns fail validation. Also, `systemPrompt` was already being passed separately as `system: systemPrompt` in the `generateContent` call — duplicating it inside `messages` adds it twice.
+
+---
+
+## Task 7 — Gemini Client: Multi-turn Upgrade
+
+### What was built
+
+Modified `geminiClient.js` to detect whether `prompt.message` is a string (Day 1 mode) or an array (agent loop mode) and handle each correctly.
+
+### The fix
+
+```js
+// Before (Day 1 only — always wraps message as a string):
+const primer = prompt.primer ?? 'Thought:';
+const contents = [
+    { role: 'user',  parts: [{ text: prompt.message }] },
+    { role: 'model', parts: [{ text: primer }] },
+];
+
+// After (supports both modes):
+let contents;
+if (Array.isArray(prompt.message)) {
+    contents = prompt.message;      // agent loop: pass full history directly
+} else {
+    const primer = prompt.primer ?? 'Thought:';
+    contents = [
+        { role: 'user',  parts: [{ text: prompt.message }] },
+        { role: 'model', parts: [{ text: primer }] },
+    ];                              // single-turn: wrap + add primer
+}
+```
+
+**Why this works:** `Array.isArray()` is the canonical JavaScript way to check if a value is an array. When `agentLoop.js` passes `message: messages` (array), the `if` branch runs and `contents` becomes the full history. When `index.js` passes `message: "some string"`, the `else` branch runs and builds the 2-item array with primer.
+
+**Why no primer in agent loop mode:** The growing history already contains previous `Thought:` / `Action:` outputs from the model. The model sees this pattern and continues it naturally. The primer was only needed to force format on the very first single-turn call.
+
+---
+
 ## Day 1 — Format Investigation & Known Limitation
 
 ### The issue
@@ -693,6 +865,13 @@ Reason: The format problem is not a code problem. It will resolve naturally in *
 | 12 | `tools/webSearch.js` | `slice(0, 5)` returns 5 articles — should be 3 per spec | Medium | ✅ Fixed — changed to `slice(0, 3)` |
 | 13 | `tools/webSearch.js` | `catch` block returned `undefined` — no fallback, breaks agent loop | High | ✅ Fixed — returns mock result array |
 | 14 | `tools/webSearch.js` | `import axios` — dead import after switching to `newsapi` SDK | Low | ✅ Fixed — import commented out |
+| 15 | `agentLoop.js` | Import from `../tools/toolDispatcher.js` — new empty file, not the Day 2 implementation | High | ✅ Fixed — changed to `./toolDispatcher.js` |
+| 16 | `agentLoop.js` | `const [tool, args, error] = action` — array destructure on object, causes `not iterable` crash | High | ✅ Fixed — changed to `const { tool, args, error } = parseAction(response)` |
+| 17 | `agentLoop.js` | `role: 'assistant'` — Gemini requires `role: 'model'` | High | ✅ Fixed — changed to `'model'` |
+| 18 | `agentLoop.js` | `json.stringify` — lowercase, undefined variable | Medium | ✅ Fixed — changed to `JSON.stringify` |
+| 19 | `agentLoop.js` | Two consecutive `user` turns in `messages` init — Gemini API rejects | High | ✅ Fixed — removed systemPrompt from messages array |
+| 20 | `agentLoop.js` | `message: userQuestion` always used — history array built but never sent to Gemini | Critical | ✅ Fixed — changed to `message: messages` |
+| 21 | `geminiClient.js` | Could not accept array `message` — always wrapped in `{ text: }` causing type mismatch | Critical | ✅ Fixed — added `Array.isArray()` check to detect mode |
 
 ---
 

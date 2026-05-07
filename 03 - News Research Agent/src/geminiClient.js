@@ -39,12 +39,21 @@ export async function generateContent({model = 'gemini-3-flash-preview', prompt,
         // continue in ReAct format — this is more reliable than system
         // prompt instructions alone, because the model is a text completer:
         // it MUST continue from whatever the model turn already says.
-        const primer = prompt.primer ?? 'Thought:';
+        
+        // Hint: inside geminiClient.js, replace the contents build logic with:
+        let contents;
+        if (Array.isArray(prompt.message)) {
+            // Agent loop mode: full history already formatted — use directly
+            contents = prompt.message;
+        } else {
+            // Single-turn mode (Day 1 style): wrap in user turn + primer
+            const primer = prompt.primer ?? 'Thought:';
+            contents = [
+                { role: 'user',  parts: [{ text: prompt.message }] },
+                { role: 'model', parts: [{ text: primer }] },
+            ];
+        }
 
-        const contents = [
-            { role: 'user',  parts: [{ text: prompt.message }] },
-            { role: 'model', parts: [{ text: primer }] },
-        ];
 
         const response = await client.models.generateContent({
             model: model,

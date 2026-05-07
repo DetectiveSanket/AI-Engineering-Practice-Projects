@@ -12,6 +12,8 @@
 - [Task 3 — Context Builder (`src/contextBuilder.js`)](#task-3--context-builder-srccontextbuilderjs)
 - [Task 4 — Tool Dispatcher (`src/toolDispatcher.js`)](#task-4--tool-dispatcher-srctooldispatcherjs)
 - [Task 5 — Web Search Tool (`tools/webSearch.js`)](#task-5--web-search-tool-toolswebsearchjs)
+- [Task 6 — Agent Loop (`src/agentLoop.js`)](#task-6--agent-loop-srcagentloopjs)
+- [Task 7 — Gemini Client: Multi-turn Upgrade](#task-7--gemini-client-multi-turn-upgrade)
 - [Day 1 — Format Investigation & Known Limitation](#day-1--format-investigation--known-limitation)
 - [Master Concepts Glossary](#master-concepts-glossary)
 
@@ -663,6 +665,93 @@ Instead of returning `undefined` on failure (which would crash the agent loop), 
 | `.map(fn)` | Transforms every item in an array using a function — used to extract only needed fields |
 | Graceful fallback | Returning a valid (mock) value on error instead of crashing — keeps the agent loop running |
 | Context size management | Deliberately limiting tool output so it doesn't fill the LLM's context window |
+
+---
+
+## Task 6 — Agent Loop (`src/agentLoop.js`)
+
+### What this file does and WHY it exists
+
+`agentLoop.js` is the brain of the entire project. It runs the **ReAct loop**: Reason (Thought) → Act (call a tool) → Observe (inject tool result) → repeat until `Final Answer` or 10 steps.
+
+**Three exported imports from previous days all meet here:**
+- `generateContent` from Day 1 (Gemini call)
+- `webSearch` from Day 3 (real tool)
+- `parseAction`, `isFinalAnswer`, `extractFinalAnswer` from Day 2 (parser)
+
+---
+
+### The conversation history — the most important concept
+
+The `messages` array is a growing record of every turn in the conversation:
+
+```js
+// What messages looks like after Step 1:
+[
+    { role: 'user',  parts: [{ text: 'Research question: AI Agents?' }] },
+    { role: 'model', parts: [{ text: 'Thought: I need to search.\nAction: web_search(AI agents)' }] },
+    { role: 'user',  parts: [{ text: 'Observation: [{ title: "Claude..." }]' }] },
+]
+```
+
+On every iteration, this entire array is sent to Gemini. **The model sees the full history** and continues from where it left off. Without this, the agent would forget everything and repeat the same action forever.
+
+The Gemini API requires **alternating** `user` / `model` turns. Two consecutive same-role turns cause an API error.
+
+---
+
+### Key concepts introduced in Task 6
+
+| Concept | Plain English |
+|---|---|
+| **ReAct loop** | Reason (Thought) → Act (Action + tool) → Observe → repeat until done |
+| **Conversation history (`messages`)** | Growing array of turns sent to Gemini each iteration so it remembers everything |
+| **`role: 'user'` vs `role: 'model'`** | Gemini's two valid turn types. `'user'` = human/tool result. `'model'` = AI response |
+| **Alternating turns** | Gemini requires user/model/user/model order. Two consecutive same roles = API error |
+| **Observation injection** | Injecting a tool result back into conversation as a user turn so the model reads it |
+| **Max steps guard** | Caps the loop at N iterations to prevent infinite loops from bad model output |
+| **Object destructuring `{ }`** | Unpacks object fields by name: `const { tool, args } = obj` |
+| **`JSON.stringify(val, null, 2)`** | Converts any JS value to a formatted JSON string with 2-space indent |
+
+---
+
+## Task 7 — Gemini Client: Multi-turn Upgrade
+
+### What changed and WHY
+
+Original `geminiClient.js` was built for Day 1: it received a **string** and built a 2-item `contents` array. The agent loop needs to pass a **full array** of turns. These are incompatible. The fix: detect which mode it's in.
+
+```js
+let contents;
+if (Array.isArray(prompt.message)) {
+    // Agent loop mode: pass the full messages array straight through
+    contents = prompt.message;
+} else {
+    // Single-turn mode (Day 1): wrap string in a user turn + primer
+    const primer = prompt.primer ?? 'Thought:';
+    contents = [
+        { role: 'user',  parts: [{ text: prompt.message }] },
+        { role: 'model', parts: [{ text: primer }] },
+    ];
+}
+```
+
+`Array.isArray(value)` returns `true` if `value` is an array, `false` for strings, objects, null, etc.
+
+| Caller | `prompt.message` | `Array.isArray` | Path |
+|---|---|---|---|
+| `index.js` | `"What is AI?"` (string) | `false` | Wrap + add primer |
+| `agentLoop.js` | `[{role:'user',...}]` (array) | `true` | Pass directly |
+
+**Why no primer in agent loop mode?** The conversation history itself enforces ReAct format — the model sees its own previous `Thought:` / `Action:` lines and continues the pattern naturally. No primer needed.
+
+### Key concepts introduced in Task 7
+
+| Concept | Plain English |
+|---|---|
+| **`Array.isArray(value)`** | Returns `true` if value is an array. The safest way to check for arrays in JS |
+| **Dual-mode function** | A function that accepts two different input shapes and handles each appropriately |
+| **Primer only for single-turn** | Response priming with `Thought:` is only needed when there's no conversation history |
 
 ---
 

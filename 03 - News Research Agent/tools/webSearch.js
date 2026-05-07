@@ -18,6 +18,9 @@ const newsapi = new NewsAPI(process.env.NEWS_API_KEY);
 
 export async function webSearch(query) {
 
+    console.log('------- webSearch tool is called ------');
+    console.log("Query :- " , query);
+    
     try {
         
         const respose = await newsapi.v2.everything({
@@ -68,12 +71,9 @@ export async function webSearch(query) {
 
 
 /* 
-    ## Manually
+    !## Manually
 
     export async function webSearch(query) {
-    
-        console.log('we are inside the function');
-        
     
         const API_KEY = process.env.NEWS_API_KEY;
     
@@ -103,8 +103,6 @@ export async function webSearch(query) {
             console.log('articles' , articles);
             
     
-    
-    
             Return top 3 results
             return articles.slice(0, 3).map(article => ({
                 title: article.title,
@@ -119,8 +117,7 @@ export async function webSearch(query) {
             console.log(`Error` );
             
         }
-    
-    
+
     };
     
     webSearch('Who win ipl 2025');
