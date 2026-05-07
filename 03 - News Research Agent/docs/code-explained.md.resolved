@@ -11,6 +11,7 @@
 - [Task 2 — Gemini Client](#task-2--gemini-client)
 - [Task 3 — Context Builder](#task-3--context-builder)
 - [Task 4 — Tool Dispatcher](#task-4--tool-dispatcher)
+- [Task 5 — Web Search Tool](#task-5--web-search-tool)
 - [Day 1 — Format Investigation & Known Limitation](#day-1--format-investigation--known-limitation)
 - [Bug Log](#bug-log)
 - [Glossary](#glossary)
@@ -438,6 +439,116 @@ One regex, defined once, used consistently.
 
 ---
 
+## Task 5 — Web Search Tool
+
+### What was built
+
+| File | Role |
+|---|---|
+| `tools/webSearch.js` | Calls NewsAPI `/v2/everything` with a query string and returns top 3 articles as `{ title, description, url, publishedAt }`. Includes fallback on failure. |
+
+### Step-by-step
+
+**Step 1 — Choose the right endpoint**
+
+`newsapi.v2.everything` was used instead of `newsapi.v2.topHeadlines`. This is intentional:
+- `topHeadlines` returns trending stories by country/category — it ignores the search query
+- `everything` does a full-text keyword search across all indexed articles — correct for an agent
+
+**Step 2 — NewsAPI SDK client (singleton at module level)**
+
+```js
+const newsapi = new NewsAPI(process.env.NEWS_API_KEY);
+```
+
+Created once at module load. API key from `.env`.
+
+**Step 3 — Status guard**
+
+```js
+if(respose.status !== 'ok' || !respose.articles) {
+    return 'No articles found for this query.';
+}
+```
+
+Guards against API quota errors or empty responses before trying to map the articles.
+
+**Step 4 — Slice to 3 + map to lean shape**
+
+```js
+return articles.slice(0, 3).map(article => ({
+    title: article.title,
+    description: article.description,
+    url: article.url,
+    publishedAt: article.publishedAt
+}));
+```
+
+Caps at 3 results (context size management). Maps to only 4 fields (the agent doesn't need author, source, etc.).
+
+**Step 5 — Fallback in catch block**
+
+```js
+} catch (error) {
+    console.log(`webSearch error: ${error.message}`);
+    return [
+        {
+            title: "Search unavailable",
+            description: "Could not retrieve live results. Please try again.",
+            url: "",
+            publishedAt: new Date().toISOString()
+        }
+    ];
+}
+```
+
+Returns a valid array on failure so the agent loop never receives `undefined`.
+
+---
+
+### Mistakes & Fixes
+
+**❌ Wrong: `slice(0, 5)` — returns too many articles**
+
+```js
+return articles.slice(0, 5).map(...)  // ← 5 articles
+```
+
+Task spec requires 3. More articles = more tokens in the context window = higher chance of hitting limits later in the agent loop.
+
+**✅ Fixed:** `slice(0, 3)`
+
+---
+
+**❌ Wrong: `catch` block returned `undefined`**
+
+```js
+} catch (error) {
+    console.log(`Error: ${error.message}`);
+    // no return statement — function returns undefined
+}
+```
+
+The agent loop receives `undefined` from `webSearch()` and crashes or produces `null` observations.
+
+**✅ Fixed:** Returns a mock result array with the same shape as a real result.
+
+---
+
+**❌ Wrong: `import axios from "axios"` — dead import**
+
+Axios was imported from an earlier attempt using raw HTTP. After switching to the `newsapi` SDK, the import became unused.
+
+**✅ Fixed:** Import commented out.
+
+---
+
+### Test result
+
+Query `"AI Agent by Anthropic?"` returned 3 real articles from NewsAPI — structured correctly, no errors.
+
+---
+
 ## Day 1 — Format Investigation & Known Limitation
 
 ### The issue
@@ -579,6 +690,9 @@ Reason: The format problem is not a code problem. It will resolve naturally in *
 | 9 | Day 1 overall | Single-turn ReAct format not achievable with RLHF-tuned model | Design | ⚠️ Known — resolves in Day 3 agent loop |
 | 10 | `toolDispatcher.js` | `yourRegex` defined at module level but never used — dead variable | Low | ⚠️ Documented — rename to `ACTION_REGEX` and use inside function |
 | 11 | `toolDispatcher.js` | Function used inline regex `.+` instead of safer `[^)]*` from module-level | Medium | ⚠️ Documented — tests passed but edge case exists (space before `(`) |
+| 12 | `tools/webSearch.js` | `slice(0, 5)` returns 5 articles — should be 3 per spec | Medium | ✅ Fixed — changed to `slice(0, 3)` |
+| 13 | `tools/webSearch.js` | `catch` block returned `undefined` — no fallback, breaks agent loop | High | ✅ Fixed — returns mock result array |
+| 14 | `tools/webSearch.js` | `import axios` — dead import after switching to `newsapi` SDK | Low | ✅ Fixed — import commented out |
 
 ---
 

@@ -11,6 +11,7 @@
 - [Task 2 — Gemini Client (`src/geminiClient.js`)](#task-2--gemini-client-srcgeminiclientjs)
 - [Task 3 — Context Builder (`src/contextBuilder.js`)](#task-3--context-builder-srccontextbuilderjs)
 - [Task 4 — Tool Dispatcher (`src/toolDispatcher.js`)](#task-4--tool-dispatcher-srctooldispatcherjs)
+- [Task 5 — Web Search Tool (`tools/webSearch.js`)](#task-5--web-search-tool-toolswebsearchjs)
 - [Day 1 — Format Investigation & Known Limitation](#day-1--format-investigation--known-limitation)
 - [Master Concepts Glossary](#master-concepts-glossary)
 
@@ -541,6 +542,127 @@ Output: { tool: null, error: 'parse_failed' }                ✅
 | Whitelist validation | Checking user/model input against a fixed list of allowed values before acting on it |
 | Module-level constants | Variables defined outside functions so they're created once and shared across all calls |
 | `String.prototype.includes()` | Returns `true` if the string contains the given substring anywhere |
+
+---
+
+## Task 5 — Web Search Tool (`tools/webSearch.js`)
+
+### What this file does and WHY it exists
+
+`webSearch.js` is the **first real tool** in the agent. Until now, everything was plumbing: prompts, parsers, clients. This file is where the agent actually reaches out to the internet and retrieves live information.
+
+It wraps the **NewsAPI** service. When called with a search query string, it returns an array of up to 3 recent news articles — structured as `{ title, description, url, publishedAt }` — that the agent loop can inject back into the LLM's context as an `Observation`.
+
+**Why `newsapi` SDK instead of raw `axios`?**
+- The `newsapi` npm package is a thin, official wrapper that handles auth headers, URL construction, and error typing for you.
+- Using raw `axios` would require manually building the URL and managing headers — more code, more places to make mistakes.
+
+**Why `/v2/everything` instead of `/v2/topHeadlines`?**
+
+| Endpoint | What it does | When to use |
+|---|---|---|
+| `/v2/topHeadlines` | Returns current top stories by *country* or *category* | Headlines page, daily briefing |
+| `/v2/everything` | Full-text search across ALL articles by *keyword* | **Agent queries — use this** |
+
+`topHeadlines` ignores your search query and just returns trending stories. `everything` actually searches. Since the agent passes user queries like `"AI regulation 2025"`, `everything` is the only correct choice.
+
+---
+
+### Line-by-line explanation
+
+#### Imports and dotenv setup
+
+```js
+import NewsAPI from "newsapi";
+import { config } from "dotenv";
+import { fileURLToPath } from "url";
+import { dirname, join } from "path";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+config({ path: join(__dirname, "..", ".env") });
+```
+
+Same ESM `__dirname` workaround as `geminiClient.js`. Needed because `tools/` is one directory deep — `join(__dirname, "..", ".env")` walks up to the project root to find the `.env` file.
+
+#### Creating the NewsAPI client
+
+```js
+const newsapi = new NewsAPI(process.env.NEWS_API_KEY);
+```
+
+Singleton pattern — one client instance at module load time. The API key is read from the environment, never hardcoded.
+
+#### The `webSearch(query)` function
+
+```js
+export async function webSearch(query) {
+    try {
+        const respose = await newsapi.v2.everything({
+            q: query,
+            language: 'en',
+        });
+```
+
+- **`newsapi.v2.everything`** — calls the `/v2/everything` NewsAPI endpoint. The SDK converts `{ q, language }` into the correct HTTP query parameters.
+- **`language: 'en'`** — filters to English articles only, keeping the LLM context clean.
+- **`async/await`** — the HTTP call is asynchronous; `await` pauses until the response arrives.
+
+#### Status guard
+
+```js
+if(respose.status !== 'ok' || !respose.articles) {
+    return 'No articles found for this query.';
+}
+```
+
+NewsAPI returns `{ status: 'ok', articles: [...] }` on success. If the status isn't `'ok'` or articles is missing (e.g. API quota exceeded), this returns a string message instead of crashing.
+
+#### Slicing and mapping
+
+```js
+return articles.slice(0, 3).map(article => ({
+    title: article.title,
+    description: article.description,
+    url: article.url,
+    publishedAt: article.publishedAt
+}));
+```
+
+- **`slice(0, 3)`** — caps results at 3. NewsAPI can return 100 articles per request. Injecting 100 articles into the LLM context would fill the context window and be wasteful. 3 is enough for the agent to form an answer.
+- **`.map(...)`** — transforms each raw article object (which has ~10 fields) into only the 4 fields the agent needs. Keeps the observation lean.
+
+#### Fallback on error
+
+```js
+} catch (error) {
+    console.log(`webSearch error: ${error.message}`);
+    return [
+        {
+            title: "Search unavailable",
+            description: "Could not retrieve live results. Please try again.",
+            url: "",
+            publishedAt: new Date().toISOString()
+        }
+    ];
+}
+```
+
+Instead of returning `undefined` on failure (which would crash the agent loop), the catch block returns a **mock result array** in the same shape as a real result. This means the agent loop always receives an array — it never has to handle a `null` or `undefined` case.
+
+---
+
+### Key concepts introduced in Task 5
+
+| Concept | Plain English |
+|---|---|
+| NewsAPI `/v2/everything` | Full-text keyword search across all indexed news articles |
+| NewsAPI `/v2/topHeadlines` | Current trending headlines by country/category — does NOT use your query |
+| API rate limit | The free NewsAPI tier allows 100 requests/day; exceeding it returns an error |
+| `.slice(0, N)` | Returns the first N items of an array — used here to cap context size |
+| `.map(fn)` | Transforms every item in an array using a function — used to extract only needed fields |
+| Graceful fallback | Returning a valid (mock) value on error instead of crashing — keeps the agent loop running |
+| Context size management | Deliberately limiting tool output so it doesn't fill the LLM's context window |
 
 ---
 

@@ -2,6 +2,7 @@ import { generateContent } from './src/geminiClient.js';
 import * as readline from 'node:readline/promises';
 import { stdin as input, stdout as output } from 'node:process'; 
 import { buildPromptWithTools } from './src/contextBuilder.js';
+// import { webSearch } from './tools/webSearch.js';
 
 
 const rl = readline.createInterface({ input, output });
@@ -44,8 +45,12 @@ async function run() {
                 }
             })
 
+        
+            
             console.log('  **************************************************************');
             console.log(" AI Response :- " , response);
+
+
             console.log('  **************************************************************');
 
 
@@ -63,18 +68,18 @@ rl.on("close", () => {
 
 
 /* 
-    ### Day 2 — Build the action parser (S4: toolDispatcher.js)
+    ### Day 3 — First real tool: webSearch() (S5)
+        Goal: The agent can actually search for news.
 
-        > Goal: Extract tool name and argument from raw LLM output reliably.
+    Get NewsAPI free key: https://newsapi.org — free tier, 100 requests/day.
 
-        Tasks:
-        - [ ] Write toolDispatcher.js with function parseAction(text)
-        - [ ] It should extract from "Action: web_search(AI regulation 2025)"
-        → { tool: "web_search", args: "AI regulation 2025" }
-        - [ ] Handle edge cases:
-        - Extra spaces: "Action:  web_search( query here )" → still works
-        - Wrong format: LLM forgets "Action:" prefix → return { tool: null, error: "parse_failed" }
-        - Unknown tool name → return { tool: null, error: "unknown_tool" }
-        - [ ] Write tests manually: paste 5 different LLM outputs, check parser output
+    Tasks:
+    - [ ] npm install axios - done
+    - [ ] Add NEWS_API_KEY to .env - done
+    - [ ] Write tools/webSearch.js — function webSearch(query) - done
+    - [ ] Call NewsAPI /everything endpoint with the query - done
+    - [ ] Return structured result: array of { title, description, url, publishedAt } -- done
+    - [ ] Cap at top 3 results to keep context short - done  
+    - [ ] Add fallback: if API fails, return mock result (so the agent loop still runs) - done
 
 */
