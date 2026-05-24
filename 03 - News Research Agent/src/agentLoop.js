@@ -1,5 +1,7 @@
 
 import {webSearch} from '../tools/webSearch.js';
+import {summarize} from '../tools/summarize.js';
+import {checkClaim} from '../tools/checkClaim.js';
 import {generateContent} from './geminiClient.js';
 import { buildPromptWithTools } from "./contextBuilder.js";
 import { parseAction, isFinalAnswer, extractFinalAnswer } from "./toolDispatcher.js";
@@ -9,6 +11,7 @@ const sessionMemory = {
     lastTopic: null,
     questionCount: 0
 }
+
 
 export async function runAgent(question ) {
     
@@ -21,25 +24,30 @@ export async function runAgent(question ) {
         { role: "user", parts: [{ text: userQuestion }] }
     ];
     
-    const MAX_STEPS = 10;
+    const MAX_STEPS = 5; // Step 1 often uses prose (wasted step) + 2 tool calls + Final Answer needs ~4-5 steps
     let steps = 0;
     
     while (steps < MAX_STEPS) {
         steps++;
         console.log(`\n--- Step ${steps} ---`);
         
-        // 1. Call Gemini
+        // Hint — in agentLoop.js, before calling generateContent:
+        const contentsWithPrimer = [
+            ...messages,
+            { role: 'model', parts: [{ text: 'Thought:' }] }  // ← forces model to continue from here
+        ];
+
+        // Then pass contentsWithPrimer instead of messages:
         const response = await generateContent({
             prompt: {
-                system : systemPrompt,
-                message : messages //  how to pass the conversation history.  ( check this point ) {because model always needs }
-                 
+                system: systemPrompt,
+                message: contentsWithPrimer
             },
             config: {
-                temperature : 0.2,
-                topP : 0.95
+                temperature: 0.2,
+                topP: 0.95
             }
-        });
+        })
 
         console.log('Agent response :- ' , response);
         messages.push({
@@ -61,46 +69,88 @@ export async function runAgent(question ) {
         if(error) {
             messages.push({
                 role: 'user',
-                parts: [{text: `Observation error : ${error}. Try again.`}]
+                parts: [{text: 
+                    `FORMAT VIOLATION: You did not follow the required format.
+                    You MUST respond using ONLY this exact structure:
+
+                    Thought: [your reasoning]
+                    Action: tool_name(your search query)
+
+                    Available tools: web_search, summarize, check_claim
+                    Do NOT answer directly. You MUST call a tool first.`
+                }]
             })
-            continue;
+            continue; //? this will skip the tool calling part and go back to the start of the loop
         }
         
-        // 5. Execute the tool (feature when all three tool are ready)
-        // let result = ""
-        // switch(tool) {
-        //     case 'web_search' :
-        //         result = await webSearch(args);
-        //         break;
+        //* 5. Execute the tool — strip surrounding quotes from args first
+        // The LLM sometimes wraps args in quotes: Action: web_search("query")
+        // NewsAPI treats quoted strings as exact phrase matches → returns []
+        // Stripping the outer quotes makes the search work correctly.
+        const cleanArgs = args.replace(/^"|"$/g, '').trim();
 
-        //     case 'summarize' : 
-        //         result = await summarize(args);
-        //         break;
+        let result = "";
+        switch(tool) {
 
-        //     case 'check_claim' : 
-        //         result = await checkClaim(args);
-        //         break;
-                
-        //     default : 
-        //         result = `Unknown tool: ${tool}`;
-        // }
+            case 'web_search':
+                console.log("Tool is web_search");
+                const web = await webSearch(cleanArgs);
+                result = JSON.stringify(web);
+                console.log("Observation:", result.slice(0, 200) + '...');
+                break;
 
-        let Observation = "";
-        if(tool === 'web_search') {
-            const result = await webSearch(args);
-            Observation = JSON.stringify(result, null, 2);
-        } else {
-            Observation = `Tool ${tool} not yet implemented....`
+            case 'summarize':
+                console.log("Tool is summarize");
+                const sum = await summarize(cleanArgs);
+                result = sum; // already a string — no need to JSON.stringify
+                console.log("Observation:", result.slice(0, 200) + '...');
+                break;
+
+            case 'check_claim':
+                console.log("Tool is check_claim");
+                const claim = await checkClaim(cleanArgs);
+                result = JSON.stringify(claim);
+                console.log("Observation:", result);
+                break;
+
+            default:
+                console.log("Unknown tool:", tool);
+                result = `Unknown tool: ${tool}`;
         }
-
-        console.log("Observation:", Observation.slice(0, 200) + "...");
 
         messages.push({
             role: 'user',
-            parts: [{text: `Observation : ${Observation}`}]
-        });
+            parts: [{text: `Observation : ${result}`}]
+        })
+
+    //* Another way        
+        // let Observation = "";
+        // if(tool === 'web_search') {
+        //     const result = await webSearch(args);
+        //     Observation = JSON.stringify(result, null, 2);
+        // }
+        
+        // else if(tool === 'summarize') {
+        //     const result = await summarize(args);
+        //     Observation = JSON.stringify(result, null, 2);
+        // }
+        
+        // else if(tool === 'check_claim') {
+        //     const result = await checkClaim(args);
+        //     Observation = JSON.stringify(result, null, 2);
+        // }
+        // else {
+        //     Observation = `Tool ${tool} not yet implemented....`
+        // }
+
+        // console.log("Observation:", Observation.slice(0, 200) + "...");
+
+        // messages.push({
+        //     role: 'user',
+        //     parts: [{text: `Observation : ${Observation}`}]
+        // });
         
     }
 
-    return "Error: I couldn't find an answer within 10 steps. Try rephrasing your question.";
+    return `Error: I couldn't find an answer within ${MAX_STEPS} steps. Try rephrasing your question.`;
 };

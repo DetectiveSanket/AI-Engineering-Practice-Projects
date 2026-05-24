@@ -5,39 +5,43 @@ const ACTION_REGEX = /Action:\s*(\w+)\s*\(([^)]*)\)/;
 
 export function parseAction(text) {
 
-    // 1. check the llm ouptut and extract the actoin (tool name) from the text/response to be used in the tool call 
+    //* 1. check the llm ouptut and extract the actoin (tool name) from the text/response to be used in the tool call 
     const actionMatch = text.match(ACTION_REGEX); // -> this will look for "Action:" followed by whitespace, then capture the function name and arguments
 
-    //2. check if the action is valid (present in the tools list)
+    //* 2. check if the action is valid (present in the tools list)
     if(!actionMatch) {
         return {
             tool: null,
+            args: null,
             error: "parse_failed"
         }
     };
 
-    // 2.1 extract the tool name and argumnets form the actionMatch
-    // const = actionMatch[0] // -> full matched string :- "Action: web_search(AI regulation 2025)"
-    // const toolName = actionMatch[1]; // -> tool name :- "web_search"
-    // const args = actionMatch[2]; // -> arguments :- "AI regulation 2025"
+    //* 2.1 extract the tool name and argumnets form the actionMatch
+    // const full_matched_string = actionMatch[0] // -> full matched string :- "Action: web_search(AI regulation 2025)"
+    // const tool_name = actionMatch[1]; // ->ex- tool_name :- "web_search"
+    // const arguments = actionMatch[2]; // ->ex- arguments :- "AI regulation 2025"
 
+    // ! best way than above one..
     const [, toolName , args] = actionMatch;
 
-    // 2.2 check the valid tool
-    // const validTools = ['web_search', 'summarize', 'check_claim'];
+    //* 2.2 check the valid tool
+    // const validTools = ['web_search', 'summarize', 'check_claim']; --> create globally 
     
     if(!validTools.includes(toolName)) {
         return {
             tool: null,
+            args: null,
             error: "unknown_tool"
         }
     };
 
 
-    //3. return an object in the format {tool: "web_search", args: "AI regulation 2025"}    
+    //* 3. return an object in the format {tool: "web_search", args: "AI regulation 2025"}    
     return {
         tool:toolName,
-        args: args.trim()
+        args: args.trim(), // - remove extra whitespaces
+        error: null
     };
 };
 

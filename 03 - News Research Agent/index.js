@@ -70,24 +70,28 @@ rl.on("close", () => {
 
 
 /* 
-    ### Day 4 — Build the core ReAct loop (S3: agentLoop.js)
+    ### ### Day 5 — Add the other two tools (S5 continued)
 
-        > Goal: The loop runs. Agent thinks, calls web_search, sees result, loops again.
-
-        This is the most important file in the project. Take your time on it.
+        > Goal: Agent has all 3 tools. It can choose which one to use.
 
         Tasks:
-        - [ ] Write agentLoop.js — async function runAgent(question) - done
-        - [ ] Maintain a messages array (conversation history) - done
-        - [ ] Each iteration: - done
-        1. Call Gemini with full messages array
-        2. Append assistant response to messages
-        3. Check: is it "Final Answer:"? → return answer, exit
-        4. Check: is it "Action:"? → parse it, run tool, get result
-        5. Append tool result as: "Observation: [result]"
-        6. Loop again
-        - [ ] Add a max steps guard (10 steps max) — prevents infinite loops - done
-        - [ ] Log every step to terminal so you can watch the agent think - done
+        - [ ] Write tools/summarize.js — function summarize(text)
+        Uses Gemini: "Summarize this in 3 bullet points: [text]"
+        Returns string of bullet points
+
+        - [ ] Write tools/checkClaim.js — function checkClaim(claim)
+        1. Calls webSearch(claim) to get recent articles
+        2. Asks Gemini: "Based on these articles: [articles], is this claim accurate: [claim]?
+            Return JSON: { verdict: 'true'|'false'|'uncertain', reasoning: string }"
+        3. Returns the verdict object
+
+        - [ ] Update toolDispatcher.js and agentLoop.js to route to all 3 tools
+
+        - [ ] Test: ask "Is it true that OpenAI released GPT-5?" 
+        Agent should: search → summarize → check claim → final answer
+
+        Definition of done: All 3 tools run without errors. Agent uses at least 2 different
+        tools in one research session.
 
 
 

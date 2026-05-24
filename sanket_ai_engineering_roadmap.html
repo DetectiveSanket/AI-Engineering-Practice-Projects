@@ -1,0 +1,281 @@
+
+<style>
+.sr-only{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0)}
+.phase-card{background:var(--color-background-primary);border:0.5px solid var(--color-border-tertiary);border-radius:var(--border-radius-lg);padding:1.25rem;margin-bottom:1rem}
+.phase-header{display:flex;align-items:center;gap:10px;margin-bottom:1rem}
+.phase-badge{font-size:11px;font-weight:500;padding:3px 10px;border-radius:20px;white-space:nowrap}
+.badge-now{background:#FAEEDA;color:#633806}
+.badge-next{background:#EEEDFE;color:#3C3489}
+.badge-after{background:#E1F5EE;color:#085041}
+.badge-defer{background:#F1EFE8;color:#444441}
+.phase-title{font-size:16px;font-weight:500;color:var(--color-text-primary)}
+.proj-row{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px}
+.proj-box{background:var(--color-background-secondary);border-radius:var(--border-radius-md);padding:12px 14px;border:0.5px solid var(--color-border-tertiary)}
+.proj-name{font-size:14px;font-weight:500;color:var(--color-text-primary);margin-bottom:4px}
+.proj-sub{font-size:12px;color:var(--color-text-secondary);line-height:1.5;margin-bottom:6px}
+.tag-row{display:flex;flex-wrap:wrap;gap:4px;margin-top:6px}
+.tag{font-size:11px;padding:2px 8px;border-radius:10px;background:var(--color-background-info);color:var(--color-text-info)}
+.tag-p{background:#EEEDFE;color:#3C3489}
+.tag-g{background:#EAF3DE;color:#27500A}
+.tag-a{background:#FAEEDA;color:#633806}
+.tag-r{background:#FCEBEB;color:#791F1F}
+.divider{border:none;border-top:0.5px solid var(--color-border-tertiary);margin:1rem 0}
+.expand-btn{font-size:12px;color:var(--color-text-info);background:none;border:none;cursor:pointer;padding:0;margin-top:6px}
+.detail-box{display:none;background:var(--color-background-tertiary);border-radius:var(--border-radius-md);padding:10px 12px;margin-top:8px;font-size:12px;color:var(--color-text-secondary);line-height:1.6}
+.detail-box.open{display:block}
+.single-proj{background:var(--color-background-secondary);border-radius:var(--border-radius-md);padding:12px 14px;border:0.5px solid var(--color-border-tertiary);margin-bottom:8px}
+.concept-list{display:flex;flex-wrap:wrap;gap:4px;margin-top:8px}
+.arrow-connector{text-align:center;font-size:18px;color:var(--color-text-tertiary);margin:6px 0}
+.warn-box{background:var(--color-background-warning);border:0.5px solid var(--color-border-warning);border-radius:var(--border-radius-md);padding:10px 14px;font-size:13px;color:var(--color-text-warning);margin-bottom:1rem}
+</style>
+
+<h2 class="sr-only">Sanket's AI Engineering practical roadmap — 4 phases, 7 standalone projects, mapped to book chapters</h2>
+
+<div class="warn-box">
+NyayaSathi is completely separate. Every project below is standalone, fresh codebase, different domain.
+</div>
+
+<div class="phase-card">
+<div class="phase-header">
+<span class="phase-badge badge-now">Phase 1 — Start here · 2–3 weeks</span>
+<span class="phase-title">The foundation project</span>
+</div>
+
+<div class="single-proj">
+<div class="proj-name">Project 1 — AI Study Buddy (CLI)</div>
+<div class="proj-sub">A command-line tool where you type a topic, it generates explanation + quiz + follow-up questions using raw Gemini/OpenAI API calls. No frameworks. Pure Python.</div>
+<div class="tag-row">
+<span class="tag tag-p">LLM basics</span>
+<span class="tag tag-p">Generation params</span>
+<span class="tag tag-p">Text generation strategies</span>
+<span class="tag tag-p">Prompt engineering</span>
+<span class="tag tag-p">JSON prompting</span>
+<span class="tag tag-p">CoT prompting</span>
+</div>
+<button class="expand-btn" onclick="toggle(this)">See exactly what to build ↓</button>
+<div class="detail-box">
+Build in this exact order:<br>
+1. Call Gemini API, get a plain text explanation of any topic<br>
+2. Add temperature, top_p, max_tokens controls — see how output changes<br>
+3. Force JSON output (structured quiz: question + 4 options + answer)<br>
+4. Add chain-of-thought: "think step by step before answering"<br>
+5. Add greedy vs sampling vs beam comparison — show 3 outputs for same prompt<br><br>
+Why this first: You learn LLM behavior directly. No abstraction layer hiding what's happening. Every AI project you build after this will be clearer because you understand generation fundamentals.
+</div>
+</div>
+</div>
+
+<div class="arrow-connector">↓</div>
+
+<div class="phase-card">
+<div class="phase-header">
+<span class="phase-badge badge-now">Phase 1 continued · week 3–4</span>
+<span class="phase-title">Add memory and evaluation to Project 1</span>
+</div>
+
+<div class="single-proj">
+<div class="proj-name">Project 2 — Upgrade Study Buddy to a stateful tutor</div>
+<div class="proj-sub">Same project, now with conversation history, session memory, and a self-evaluation loop. The LLM grades its own previous answer using G-eval logic.</div>
+<div class="tag-row">
+<span class="tag tag-p">LLM memory types</span>
+<span class="tag tag-p">Multi-turn conversation</span>
+<span class="tag tag-p">G-eval</span>
+<span class="tag tag-p">Component-level evals</span>
+<span class="tag tag-p">LLM-as-judge</span>
+</div>
+<button class="expand-btn" onclick="toggle(this)">See exactly what to build ↓</button>
+<div class="detail-box">
+1. Add conversation history array — pass full history each API call<br>
+2. Add in-memory session store (Python dict, not Redis — keep it simple)<br>
+3. After each explanation, call the LLM again with: "Rate this explanation 1–5 for accuracy, clarity, completeness. Return JSON."<br>
+4. Log every score. Show running average.<br>
+5. If score is below 3, auto-regenerate with a better prompt.<br><br>
+Why this is the same project: Upgrading existing code is realistic. You see concretely how evaluation plugs into generation, not as a separate concern.
+</div>
+</div>
+</div>
+
+<div class="arrow-connector">↓</div>
+
+<div class="phase-card">
+<div class="phase-header">
+<span class="phase-badge badge-next">Phase 2 · weeks 5–7</span>
+<span class="phase-title">Build your first real Agent — completely new project</span>
+</div>
+
+<div class="single-proj">
+<div class="proj-name">Project 3 — News Research Agent</div>
+<div class="proj-sub">An agent that takes a research question, autonomously decides which tools to call (web search, summarizer, fact-checker), reasons step by step, and produces a structured report. Built from scratch — no LangChain.</div>
+<div class="tag-row">
+<span class="tag tag-a">ReAct pattern</span>
+<span class="tag tag-a">Tool use</span>
+<span class="tag tag-a">Agent loop</span>
+<span class="tag tag-a">Agent memory</span>
+<span class="tag tag-a">Agentic design patterns</span>
+<span class="tag tag-a">Context engineering</span>
+<span class="tag tag-a">Verbalized sampling</span>
+</div>
+<button class="expand-btn" onclick="toggle(this)">See exactly what to build ↓</button>
+<div class="detail-box">
+Build in this order:<br>
+1. Write the ReAct loop manually: Thought → Action → Observation → repeat<br>
+2. Define 3 tools as Python functions: web_search(), summarize_text(), check_claim()<br>
+3. Build the tool-calling parser: LLM outputs "Action: web_search(query)" → your code parses and executes<br>
+4. Add working memory: agent keeps a scratchpad of observations so far<br>
+5. Add context window management: trim old observations when context gets too long<br>
+6. Final output: structured JSON report with sources<br><br>
+Why this domain (news): You can test it immediately, it's verifiable, and recruiters understand it instantly when you demo it.
+</div>
+</div>
+</div>
+
+<div class="arrow-connector">↓</div>
+
+<div class="phase-card">
+<div class="phase-header">
+<span class="phase-badge badge-next">Phase 2 continued · weeks 7–9</span>
+<span class="phase-title">Add RAG to the Agent — new knowledge source</span>
+</div>
+
+<div class="single-proj">
+<div class="proj-name">Project 4 — Research Agent + personal knowledge base</div>
+<div class="proj-sub">Extend Project 3. The agent now has a 4th tool: a local RAG pipeline over a folder of PDFs/notes. You build the chunking, embedding, and retrieval from scratch using ChromaDB (not Pinecone — keep it local and simple).</div>
+<div class="tag-row">
+<span class="tag tag-g">RAG from scratch</span>
+<span class="tag tag-g">5 chunking strategies</span>
+<span class="tag tag-g">Vector DB (ChromaDB)</span>
+<span class="tag tag-g">HyDE</span>
+<span class="tag tag-g">RAG vs Agentic RAG</span>
+<span class="tag tag-g">Prompting vs RAG vs FT</span>
+</div>
+<button class="expand-btn" onclick="toggle(this)">See exactly what to build ↓</button>
+<div class="detail-box">
+1. Implement chunking: try fixed-size, sentence-based, semantic — compare retrieval quality<br>
+2. Embed with Gemini embedding-001, store in ChromaDB locally<br>
+3. Add as a tool: knowledge_base_search(query) → returns top-3 chunks<br>
+4. Implement HyDE: generate a hypothetical answer first, embed that, then retrieve<br>
+5. Compare: direct query retrieval vs HyDE retrieval — log which gives better chunks<br>
+6. The agent now decides: should I search web or search knowledge base?<br><br>
+This is where RAG stops being a standalone thing and becomes one capability inside an intelligent system.
+</div>
+</div>
+</div>
+
+<div class="arrow-connector">↓</div>
+
+<div class="phase-card">
+<div class="phase-header">
+<span class="phase-badge badge-next">Phase 3 · weeks 9–11</span>
+<span class="phase-title">Expose your Agent as a service — MCP + Observability</span>
+</div>
+
+<div class="single-proj">
+<div class="proj-name">Project 5 — Wrap Project 4 as an MCP server with full tracing</div>
+<div class="proj-sub">Take the Research Agent you built. Wrap it as an MCP server so Claude Desktop (or any MCP client) can call it. Add Opik or LangSmith tracing so every LLM call, tool call, and retrieval is logged and visible.</div>
+<div class="tag-row">
+<span class="tag tag-p">MCP architecture</span>
+<span class="tag tag-p">MCP tools/resources/prompts</span>
+<span class="tag tag-p">MCP server creation</span>
+<span class="tag tag-p">LLM Observability</span>
+<span class="tag tag-p">Eval vs Observability</span>
+<span class="tag tag-p">Multi-turn evals</span>
+</div>
+<button class="expand-btn" onclick="toggle(this)">See exactly what to build ↓</button>
+<div class="detail-box">
+1. Install MCP Python SDK, expose 3 MCP tools: research(question), add_to_kb(pdf_path), get_report(topic)<br>
+2. Connect to Claude Desktop — test calling your agent from Claude's UI<br>
+3. Instrument with Opik: every LLM call gets a trace with input, output, latency, cost<br>
+4. Add eval spans: log retrieval quality score, agent step count, final answer score<br>
+5. Build a simple dashboard showing: avg steps per query, avg score, failure rate<br><br>
+After this you can say: "I built an MCP server and instrumented it with observability." That's a strong portfolio statement.
+</div>
+</div>
+</div>
+
+<div class="arrow-connector">↓</div>
+
+<div class="phase-card">
+<div class="phase-header">
+<span class="phase-badge badge-after">Phase 4 · weeks 12–15</span>
+<span class="phase-title">Multi-agent system — completely new project</span>
+</div>
+
+<div class="single-proj">
+<div class="proj-name">Project 6 — AI Code Review System (multi-agent)</div>
+<div class="proj-sub">A new project entirely. You submit a GitHub PR link. An orchestrator agent spawns 3 sub-agents: one reviews logic, one checks security, one checks style. They report back. Orchestrator synthesizes a final review. Uses A2A communication pattern.</div>
+<div class="tag-row">
+<span class="tag tag-a">Multi-agent patterns</span>
+<span class="tag tag-a">Orchestrator pattern</span>
+<span class="tag tag-a">A2A protocol</span>
+<span class="tag tag-a">5 levels of agentic AI</span>
+<span class="tag tag-a">Agent deployment</span>
+<span class="tag tag-a">Red teaming LLM apps</span>
+</div>
+<button class="expand-btn" onclick="toggle(this)">See exactly what to build ↓</button>
+<div class="detail-box">
+1. Orchestrator: receives PR diff, decides which specialist agents to invoke<br>
+2. Agent 1 (Logic): reads code, identifies bugs, returns structured JSON findings<br>
+3. Agent 2 (Security): checks for hardcoded secrets, SQL injection, common vulns<br>
+4. Agent 3 (Style): checks naming, complexity, documentation<br>
+5. Orchestrator synthesizes all 3 reports into one final review<br>
+6. Red team it: try to make it miss a bug, hallucinate a problem, loop infinitely<br>
+7. Deploy as a FastAPI endpoint<br><br>
+Why code review: You already know code, so you can verify if the agent is right or wrong. That makes debugging much faster.
+</div>
+</div>
+</div>
+
+<div class="arrow-connector">↓</div>
+
+<div class="phase-card">
+<div class="phase-header">
+<span class="phase-badge badge-after">Phase 4 continued · weeks 15–18</span>
+<span class="phase-title">Fine-tuning — only now, not before</span>
+</div>
+
+<div class="single-proj">
+<div class="proj-name">Project 7 — LoRA fine-tune a small model for code review</div>
+<div class="proj-sub">Fine-tune Mistral-7B or Phi-3 using LoRA on a dataset of good code reviews. Compare: base model vs fine-tuned model on your Project 6 test cases. You now know what "better" means because you already built the evaluator in Phase 2.</div>
+<div class="tag-row">
+<span class="tag tag-r">Fine-tuning concepts</span>
+<span class="tag tag-r">LoRA from scratch</span>
+<span class="tag tag-r">IFT dataset generation</span>
+<span class="tag tag-r">SFT vs RFT</span>
+<span class="tag tag-r">Full FT vs LoRA vs RAG</span>
+</div>
+<button class="expand-btn" onclick="toggle(this)">See exactly what to build ↓</button>
+<div class="detail-box">
+1. Generate IFT dataset: use GPT-4 or Claude to generate 500 (code, review) pairs<br>
+2. Fine-tune Phi-3-mini with LoRA on Google Colab (free T4 is enough for Phi-3)<br>
+3. Run your evaluation harness from Project 2 on: base model vs fine-tuned<br>
+4. Document: where does FT help? Where does RAG beat FT? Where does prompting win?<br>
+5. Write a short "what I learned" that you can paste into your LinkedIn post<br><br>
+Why last: Fine-tuning without an evaluator is blind. You now have 6 projects of evaluation experience. You'll actually understand the results.
+</div>
+</div>
+</div>
+
+<hr class="divider">
+
+<div style="background:var(--color-background-secondary);border-radius:var(--border-radius-md);padding:12px 14px;margin-bottom:8px">
+<div style="font-size:13px;font-weight:500;color:var(--color-text-primary);margin-bottom:8px">What this roadmap deliberately skips (and why)</div>
+<div style="font-size:12px;color:var(--color-text-secondary);line-height:1.7">
+LLM from scratch training — not needed for any entry-level role you're targeting<br>
+GRPO / SFT / RL training — only after you have GPU budget and a clear use case<br>
+KV cache / quantization internals — Defer until a job requires it<br>
+vLLM / LitServe deployment — Phase 5 if you want, after you're placed<br>
+AG-UI protocol — very new, reference-only for now
+</div>
+</div>
+
+<div style="text-align:center;margin-top:1rem">
+<button style="font-size:13px;padding:8px 20px;border-radius:var(--border-radius-md);border:0.5px solid var(--color-border-secondary);background:none;color:var(--color-text-primary);cursor:pointer" onclick="sendPrompt('Give me the detailed week-by-week breakdown for Project 1 — AI Study Buddy. What do I build on day 1?')">Start with Project 1 details ↗</button>
+</div>
+
+<script>
+function toggle(btn){
+  const d=btn.nextElementSibling;
+  const open=d.classList.toggle('open');
+  btn.textContent=open?'Hide ↑':'See exactly what to build ↓';
+}
+</script>
