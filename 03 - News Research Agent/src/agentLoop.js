@@ -5,12 +5,8 @@ import {checkClaim} from '../tools/checkClaim.js';
 import {generateContent} from './geminiClient.js';
 import { buildPromptWithTools } from "./contextBuilder.js";
 import { parseAction, isFinalAnswer, extractFinalAnswer } from "./toolDispatcher.js";
+import * as memory from './memory.js';
 
-const sessionMemory = {
-    topic: [],
-    lastTopic: null,
-    questionCount: 0
-}
 
 
 export async function runAgent(question ) {
@@ -20,21 +16,37 @@ export async function runAgent(question ) {
     const userQuestion = `Research question: ${question}`;
     const systemPrompt = buildPromptWithTools();
 
-    const messages = [
-        { role: "user", parts: [{ text: userQuestion }] }
-    ];
+    memory.clear();                      // reset previous session — prevents bleed between questions
+    memory.setQuestion(userQuestion);    // store the new question
+
     
-    const MAX_STEPS = 5; // Step 1 often uses prose (wasted step) + 2 tool calls + Final Answer needs ~4-5 steps
+    const MAX_STEPS = 7; // Step 1 wasted on prose + 2-3 tool calls + Final Answer needs at least 1 step buffer
     let steps = 0;
     
     while (steps < MAX_STEPS) {
+        const context = memory.getContext(10);
+
         steps++;
         console.log(`\n--- Step ${steps} ---`);
         
         // Hint — in agentLoop.js, before calling generateContent:
+        // const contentsWithPrimer = [
+        //     context,
+        //     { role: 'model', parts: [{ text: 'Thought:' }] }  // ← forces model to continue from here
+        // ];
+
+
+        // ─── DEBUG: what context is Gemini seeing this step? ────────────────────
+        console.log('\n🧠 CONTEXT SENT TO GEMINI:');
+        console.log('-------------------------------------------');
+        console.log(context);
+        console.log('-------------------------------------------\n');
+        // ────────────────────────────────────────────────────────────────
+
+        // Build context string from memory — updated every iteration with latest observations
         const contentsWithPrimer = [
-            ...messages,
-            { role: 'model', parts: [{ text: 'Thought:' }] }  // ← forces model to continue from here
+            { role: 'user',  parts: [{ text: context }] },            // full scratchpad context
+            { role: 'model', parts: [{ text: 'Thought:' }] }         // primer — forces ReAct format
         ];
 
         // Then pass contentsWithPrimer instead of messages:
@@ -49,12 +61,15 @@ export async function runAgent(question ) {
             }
         })
 
-        console.log('Agent response :- ' , response);
-        messages.push({
-            role: 'model',
-            parts: [{ text: response}]
-        });
+        // ─── DEBUG: full model response ─────────────────────────────────────
+        console.log('🤖 GEMINI RAW RESPONSE:');
+        console.log(response);
+        console.log('───────────────────────────────────────────\n');
+        // ────────────────────────────────────────────────────────────────
 
+        // Add response to memory
+        memory.addThought(response);
+        
 
         // 2. Check for Final Answer
         if(isFinalAnswer(response)) {
@@ -65,22 +80,21 @@ export async function runAgent(question ) {
         const {tool , args , error} = parseAction(response);
 
         // 4. Check action & run tools
-
+        
+        // If format is wrong, add user message to memory
         if(error) {
-            messages.push({
-                role: 'user',
-                parts: [{text: 
-                    `FORMAT VIOLATION: You did not follow the required format.
-                    You MUST respond using ONLY this exact structure:
+            // Store as an observation (not a thought) — it's a system correction, not model reasoning
+            memory.addObservation('system', '', 
+                `FORMAT VIOLATION: You did not follow the required format.
+                You MUST respond using ONLY this exact structure:
 
-                    Thought: [your reasoning]
-                    Action: tool_name(your search query)
+                Thought: [your reasoning]
+                Action: tool_name(your search query)
 
-                    Available tools: web_search, summarize, check_claim
-                    Do NOT answer directly. You MUST call a tool first.`
-                }]
-            })
-            continue; //? this will skip the tool calling part and go back to the start of the loop
+                Available tools: web_search, summarize, check_claim
+                Do NOT answer directly. You MUST call a tool first.`
+            );
+            continue;
         }
         
         //* 5. Execute the tool — strip surrounding quotes from args first
@@ -118,10 +132,14 @@ export async function runAgent(question ) {
                 result = `Unknown tool: ${tool}`;
         }
 
-        messages.push({
-            role: 'user',
-            parts: [{text: `Observation : ${result}`}]
-        })
+        // ─── DEBUG: what observation is stored? ─────────────────────────────
+        console.log(`💾 OBSERVATION STORED IN MEMORY [${tool}]:`);
+        console.log(result.slice(0, 400));
+        console.log('...(truncated)');
+        // ────────────────────────────────────────────────────────────────
+
+        // Add observation to memory
+        memory.addObservation(tool, cleanArgs, result);
 
     //* Another way        
         // let Observation = "";

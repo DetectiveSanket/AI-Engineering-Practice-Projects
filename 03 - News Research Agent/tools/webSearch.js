@@ -41,16 +41,29 @@ export async function webSearch(query) {
         
 
         const articles = respose.articles;
-        // console.log('articles', articles);
-        
 
-        
-        return articles.slice(0, 3).map(article => ({
+        // ─── DEBUG: what did NewsAPI actually return? ───────────────────
+        console.log(`\n📰 NewsAPI raw response: ${articles.length} total articles found`);
+        console.log('📋 All article titles + dates:');
+        articles.forEach((a, i) => {
+            console.log(`  [${i+1}] "${a.title}" — ${a.publishedAt?.slice(0,10)}`);
+        });
+        // ────────────────────────────────────────────────────────────────
+
+        const top3 = articles.slice(0, 3).map(article => ({
             title: article.title,
             description: article.description,
             url: article.url,
             publishedAt: article.publishedAt
         }));
+
+        console.log('\n✅ Returning top 3 to agent:');
+        top3.forEach((a, i) => {
+            console.log(`  [${i+1}] "${a.title}"`);
+            console.log(`       ${a.description?.slice(0,100)}...`);
+        });
+
+        return top3;
         
     } catch (error) {
     console.log(`webSearch error: ${error.message}`);

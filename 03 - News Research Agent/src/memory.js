@@ -2,13 +2,17 @@
 
 const scratchpad = {
     question: "",
-    thooughts: [],
+    thoughts: [],
     observation: [],
     steps: 0
 };
 
+export function setQuestion(q) {
+    scratchpad.question = q;
+}
+
 export function addThought(thought)  {
-    scratchpad.thooughts.push({
+    scratchpad.thoughts.push({
         thought,
         timestamp: Date.now()
     });
@@ -25,7 +29,7 @@ export function addObservation(tool, args, result) {
     });  
 }
 
-export function getContext(maxObs = 5) {
+export function getContext(maxObs = 14) {
 
     // Take last N observations (rounded up)
     const recentObs = scratchpad.observation.slice(-maxObs);
@@ -37,7 +41,7 @@ export function getContext(maxObs = 5) {
     ).join('\n');
 
     // thoughts - always include last 5 thoughts
-    const recentThoughts = scratchpad.thooughts.slice(-5).map(t =>
+    const recentThoughts = scratchpad.thoughts.slice(-5).map(t =>
         t.thought
     );
     
@@ -56,5 +60,22 @@ export function getContext(maxObs = 5) {
             thoughtsText
     }
 
-    return summary;
+    // return summary;
+    return summary.text;
+}
+
+export function getScratchpad() {
+    return {
+        question: scratchpad.question,
+        thoughts: [...scratchpad.thoughts],
+        observation: [...scratchpad.observation],
+        steps: scratchpad.steps
+    };
+}
+
+export function clear() {
+    scratchpad.question = "";
+    scratchpad.thoughts = [];
+    scratchpad.observation = [];
+    scratchpad.steps = 0;
 }

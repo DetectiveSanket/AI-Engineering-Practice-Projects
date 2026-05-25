@@ -1,9 +1,7 @@
-import { generateContent } from './src/geminiClient.js';
 import * as readline from 'node:readline/promises';
 import { stdin as input, stdout as output } from 'node:process'; 
-import { buildPromptWithTools } from './src/contextBuilder.js';
-// import { webSearch } from './tools/webSearch.js';
 import { runAgent } from './src/agentLoop.js';
+import * as memory from './src/memory.js';
 
 const rl = readline.createInterface({ input, output });
 
@@ -23,7 +21,13 @@ async function run() {
         if(userInput.toLowerCase() === 'exit') {
             console.log("\n👋 Closing the AI Study Buddy. See you later!");
             rl.close();
-            break;
+            break;  
+        }
+
+        if(userInput.toLowerCase() === 'scratchpad') {
+            const sp = memory.getScratchpad();
+            console.log(JSON.stringify(sp,null,2));
+            continue;
         }
 
         try{
