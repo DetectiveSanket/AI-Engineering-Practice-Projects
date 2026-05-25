@@ -17,6 +17,7 @@
 - [Task 8 — Summarize Tool (`tools/summarize.js`)](#task-8--summarize-tool-toolssummarizejs)
 - [Task 9 — Check Claim Tool (`tools/checkClaim.js`)](#task-9--check-claim-tool-toolscheckclaim-js)
 - [Task 10 — Agent Loop: Day 5 Upgrades](#task-10--agent-loop-day-5-upgrades)
+- [Task 11 — Working Memory & Agent Robustness: Day 6 Upgrades](#task-11--working-memory--agent-robustness-day-6-upgrades)
 - [Day 1 — Format Investigation & Known Limitation](#day-1--format-investigation--known-limitation)
 - [Master Concepts Glossary](#master-concepts-glossary)
 
@@ -938,6 +939,80 @@ Free tier allows 5 Gemini requests/minute. The agent was hitting 429 errors with
 
 ---
 
+## Task 11 — Working Memory & Agent Robustness: Day 6 Upgrades
+
+### What changed and WHY
+
+In Task 11, the agent was upgraded from a naive, ballooning list of raw messages to a highly robust **Working Memory System (`memory.js`)** that keeps the agent focused, handles token budget management, and guarantees reliable, state-of-the-art behavior.
+
+Here are the four key components that were introduced:
+
+#### 1. Structured Working Memory System (`src/memory.js`)
+Instead of feeding the entire conversation history back to the model, which balloons token usage and degrades performance, we introduced a centralized session state called a **Scratchpad**:
+
+```javascript
+const scratchpad = {
+    question: "",
+    thoughts: [],
+    observation: [],
+    steps: 0
+};
+```
+
+This state is controlled via six specialized methods:
+- **`setQuestion(q)`**: Sets the original research query.
+- **`addThought(thought)`**: Appends a model's reasonings to the thought stack.
+- **`addObservation(tool, args, result)`**: Stores what a tool returned. Critically, we truncate the result to the first 800 characters using `result.slice(0, 800)`. This protects the context window from massive search results while preserving enough text for synthesis.
+- **`getContext(maxObs = 14)`**: Synthesizes a compact, readable context string for Gemini. It keeps only the last `maxObs` (e.g., 10 or 14) observations and the last 5 thoughts, and guarantees the original question is prepended at the top so the agent never forgets its goal.
+- **`getScratchpad()`**: Returns the full state of the memory.
+- **`clear()`**: Resets the state.
+
+#### 2. Memory-Driven Agent Loop (`src/agentLoop.js`)
+The agent loop was modified to dynamically construct Gemini's input from the memory system on every iteration:
+
+```javascript
+// Build context string from memory — updated every iteration with latest observations
+const context = memory.getContext(10);
+
+const contentsWithPrimer = [
+    { role: 'user',  parts: [{ text: context }] },
+    { role: 'model', parts: [{ text: 'Thought:' }] } // Forces Gemini to continue in ReAct format
+];
+```
+
+By passing `contentsWithPrimer`, the agent gets a clean, structured context view instead of a long conversational chat history. At the start of a research query, `memory.clear()` is called to prevent **state bleed** between questions.
+
+#### 3. CLI Command `scratchpad` (`index.js`)
+To aid developers in debugging the agent's internal state, we added a special CLI shortcut. Typing `scratchpad` at the CLI prompt outputs a formatted JSON dump of the current session's memory structure:
+
+```javascript
+if(userInput.toLowerCase() === 'scratchpad') {
+    const sp = memory.getScratchpad();
+    console.log(JSON.stringify(sp, null, 2));
+    continue;
+}
+```
+
+#### 4. Agent Robustness Upgrades
+Two critical issues were resolved to ensure the agent reliably answers modern, time-sensitive questions (such as whether OpenAI released GPT-5):
+- **Dynamic Date Injection (`src/contextBuilder.js`)**: We injected today's date dynamically into the system instruction. Because Gemini's training cutoff is early 2024, it previously rejected 2025/2026 search results as impossible hallucinations. Teaching the model the actual date and adding a rule to `TRUST` search results solved this.
+- **Step Budget Tuning (`src/agentLoop.js`)**: We bumped `MAX_STEPS` from `5` to `7`. Because the first step is often a formatting violation (wasted turn), the model needs additional steps for multiple tools (e.g., `web_search` → `check_claim`) plus a final step to output `Final Answer`.
+- **Verbose Debug Logs**: Comprehensive debug sections were added to `webSearch.js` (raw articles count, all titles+dates) and `agentLoop.js` (context sent to Gemini, raw responses, observations saved) to make troubleshooting instant.
+
+---
+
+### Key concepts introduced in Task 11
+
+| Concept | Plain English |
+|---|---|
+| **Scratchpad** | A dedicated data structure that tracks an agent's internal status, reasoning steps, and tool outputs independently of the raw API messages history. |
+| **Token Budget Management** | Limiting or truncating text (e.g. slicing tool results to 800 characters) to avoid bloating prompts and triggering rate limits or context exhaustion. |
+| **State Bleed** | An agent bug where previous queries/context bleed into the new session. Resolved by running a `.clear()` cleanup on startup. |
+| **Dynamic Date Injection** | Injecting the current live system date into instructions so that the LLM is time-aware and correctly processes future dates returned by web tools. |
+| **Format Priming** | A prompt engineering technique where we append a model-turn prefill (like `Thought:`) to force the LLM to complete the turn in the required format. |
+
+---
+
 ## Day 1 — Format Investigation & Known Limitation
 
 ### What was expected vs. what happened
@@ -1097,3 +1172,6 @@ The format issue is **not a code bug** — it is a model behavior characteristic
 | **Named export / import** | Exporting/importing a specific item by name from a module using `{ }` |
 | **ES Modules** | The modern JavaScript module system using `import`/`export` (vs. older `require()`) |
 | **`async/await`** | Syntax for handling asynchronous (non-blocking) operations in a readable, sequential style |
+| **State bleed** | When context or data from a previous agent execution carries over to the next session, leading to unexpected errors or incorrect context. Prevented by calling `clear()` on session startup. |
+| **Dynamic date injection** | Dynamically appending today's actual calendar date to system instructions so the model can correctly reason about time-sensitive searches instead of dismissing future dates as hallucinations. |
+| **Token budget management** | Strategically truncating or trimming large payloads (e.g. slicing tool results or removing older thoughts/observations) to prevent model context window overflow or high costs. |

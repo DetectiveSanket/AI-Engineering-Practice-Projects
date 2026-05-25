@@ -17,6 +17,7 @@
 - [Task 8 — Summarize Tool](#task-8--summarize-tool)
 - [Task 9 — Check Claim Tool](#task-9--check-claim-tool)
 - [Task 10 — Agent Loop: Day 5 Upgrades](#task-10--agent-loop-day-5-upgrades)
+- [Task 11 — Working Memory & Agent Robustness: Day 6 Upgrades](#task-11--working-memory--agent-robustness-day-6-upgrades)
 - [Day 1 — Format Investigation & Known Limitation](#day-1--format-investigation--known-limitation)
 - [Bug Log](#bug-log)
 - [Glossary](#glossary)
@@ -903,6 +904,50 @@ Without the `Thought:` primer on each iteration, the model kept responding in pr
 
 ---
 
+## Task 11 — Working Memory & Agent Robustness: Day 6 Upgrades
+
+### What was fixed
+
+**Fix 1 — Centralized Working Memory System (`memory.js`)**
+Instead of the naive messages history array which grows boundlessly, we introduced a structured working memory session scratchpad to track the original question, thought steps, and observations. Large tool outputs are truncated (`result.slice(0, 800)`) to maintain a clean token budget. A `clear()` mechanism prevents bleed between sessions.
+
+**Fix 2 — Memory-Driven ReAct Context Builder**
+The agent loop (`agentLoop.js`) now uses `memory.getContext(10)` to construct the context for Gemini. It grabs only the last 10 observations and 5 thoughts, prepended with the original question. We pass this via `contentsWithPrimer` to force the `Thought:` pattern completion turn.
+
+**Fix 3 — `scratchpad` CLI Command for observability**
+Added the `scratchpad` command to `index.js` which performs a clean JSON dump of the agent's memory for direct state inspection.
+
+**Fix 4 — Date Awareness and Step Budget Tuning**
+Dynamically injected today's date in `contextBuilder.js` to ensure the agent trusts recent news results. Increased `MAX_STEPS` to 7 to allow adequate steps for complex multi-tool research queries + final synthesis.
+
+---
+
+### Mistakes & Fixes
+
+**❌ Wrong: Naive, unbounded message stack causing context exhaustion**
+
+As the number of agent steps increased, raw message sizes grew exponentially (especially with multiple search payloads), leading to high token usage and API rate limits.
+* **Why it was wrong:** LLMs work best with concise, relevant contexts. Feeding back massive, redundant logs degrades reasoning.
+* **Fixed:** Replaced raw arrays with `memory.js` which limits observations and truncates text results to 800 chars.
+
+---
+
+**❌ Wrong: Agent dismissing real search results as hallucinations**
+
+Because Gemini's training cutoff is 2024, it assumed search results from 2025/2026 were impossible and fell back to training memory.
+* **Why it was wrong:** A research agent must trust its tools over its memory, but without a clear reference date, the LLM made a rational but incorrect assumption that the search tool was hallucinating.
+* **Fixed:** Dynamically inject today's calendar date into system instructions and added a rule forcing it to trust tool search dates.
+
+---
+
+**❌ Wrong: Wasted prose turns starving the step budget**
+
+With `MAX_STEPS = 5`, a format violation on Step 1 meant only 4 steps were left, which ran out before the agent could formulate the `Final Answer` after checking a claim.
+* **Why it was wrong:** Highly complex queries with multiple search steps require a wider step budget buffer.
+* **Fixed:** Increased `MAX_STEPS = 7` to give the agent room to synthesize its final conclusion.
+
+---
+
 ## Day 1 — Format Investigation & Known Limitation
 
 ### The issue
@@ -1063,6 +1108,9 @@ Reason: The format problem is not a code problem. It will resolve naturally in *
 | 28 | `agentLoop.js` | `args` passed raw with quotes — NewsAPI exact-phrase match returned `[]` | High | ✅ Fixed — `cleanArgs = args.replace(/^"|"$/g, '').trim()` |
 | 29 | `agentLoop.js` | Model answered prose every step — no tools called | Critical | ✅ Fixed — `Thought:` primer appended to `contentsWithPrimer` every iteration |
 | 30 | `agentLoop.js` | `MAX_STEPS = 3` too low — loop ended before Final Answer | High | ✅ Fixed — set to `5`; error message updated to use `${MAX_STEPS}` |
+| 31 | `agentLoop.js` | Time-cutoff confusion — agent assumed search results from 2025/2026 were hallucinations | Critical | ✅ Fixed — dynamically inject today's date in `contextBuilder.js` and add a hard `TRUST` rule |
+| 32 | `agentLoop.js` | Step budget starvation — wasted format correction steps left no room for final synthesis | High | ✅ Fixed — bumped `MAX_STEPS` to `7` to provide ample synthesis buffer |
+| 33 | `agentLoop.js` & `webSearch.js` | Developer blindness — unable to see what the search tool returned or what Gemini read | Medium | ✅ Fixed — added detailed step-by-step raw console logging for prompt contexts, API search result titles, and saved observations |
 
 ---
 
@@ -1086,3 +1134,6 @@ Reason: The format problem is not a code problem. It will resolve naturally in *
 | **Response priming** | Giving the model a partial start to its own response so it completes in a specific format |
 | **Model-turn prefill** | Injecting a partial `role:'model'` turn at the end of a `contents` array to prime the response |
 | **Multi-turn `contents`** | Passing `[{role:'user',...},{role:'model',...}]` to represent a conversation instead of a plain string |
+| **State bleed** | When context or data from a previous agent execution carries over to the next session, leading to unexpected errors or incorrect context. Prevented by calling `clear()` on session startup. |
+| **Dynamic date injection** | Dynamically appending today's actual calendar date to system instructions so the model can correctly reason about time-sensitive searches instead of dismissing future dates as hallucinations. |
+| **Token budget management** | Strategically truncating or trimming large payloads (e.g. slicing tool results or removing older thoughts/observations) to prevent model context window overflow or high costs. |
