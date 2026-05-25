@@ -14,6 +14,9 @@
 - [Task 5 — Web Search Tool](#task-5--web-search-tool)
 - [Task 6 — Agent Loop](#task-6--agent-loop)
 - [Task 7 — Gemini Client: Multi-turn Upgrade](#task-7--gemini-client-multi-turn-upgrade)
+- [Task 8 — Summarize Tool](#task-8--summarize-tool)
+- [Task 9 — Check Claim Tool](#task-9--check-claim-tool)
+- [Task 10 — Agent Loop: Day 5 Upgrades](#task-10--agent-loop-day-5-upgrades)
 - [Day 1 — Format Investigation & Known Limitation](#day-1--format-investigation--known-limitation)
 - [Bug Log](#bug-log)
 - [Glossary](#glossary)
@@ -721,6 +724,185 @@ if (Array.isArray(prompt.message)) {
 
 ---
 
+## Task 8 — Summarize Tool
+
+### What was built
+
+| File | Role |
+|---|---|
+| `tools/summarize.js` | Calls Gemini with a summarization prompt. Returns 3 bullet points as a string. |
+
+### Step-by-step
+
+**Step 1 — Clean imports**
+Only `generateContent` needed. No webSearch, no dispatcher, no contextBuilder.
+
+**Step 2 — Correct system/message split**
+```js
+system: "You are a precise summarization assistant. Return only bullet points, no extra text."
+message: `Summarize the following in 3 bullet points:\n\n${text}`
+```
+`system` = short persona only. `message` = instruction + content. Text appears once.
+
+**Step 3 — Low temperature**
+`temperature: 0.1` — near-deterministic for factual output.
+
+---
+
+### Mistakes & Fixes
+
+**❌ Wrong: `system: buildPromptWithTools()` — wrong persona for a summarizer**
+```js
+// Wrong:
+system: buildPromptWithTools()  // ← full ReAct agent prompt
+// Fixed:
+system: "You are a precise summarization assistant. Return only bullet points, no extra text."
+```
+**Why it was wrong:** `buildPromptWithTools()` returns the ReAct agent persona — it tells Gemini to respond with `Thought:` / `Action:` format. A summarizer doesn't need tool descriptions or ReAct format rules.
+
+---
+
+**❌ Wrong: `system: prompt, message: text` — instruction in wrong slot, text sent twice**
+```js
+// Wrong (second attempt):
+const prompt = `You are a helpful assistant. Summarize this in 3 bullet points: ${text}`;
+system: prompt,   // ← instruction + full text in system slot
+message: text     // ← same text sent AGAIN in message slot
+// Fixed:
+system: "You are a precise summarization assistant.",
+message: `Summarize the following in 3 bullet points:\n\n${text}`
+```
+**Why it was wrong:** `system` expects a persona/role, not a task. The task (with the content) goes in `message`. Sending the text in both slots wastes tokens and confuses the model.
+
+---
+
+## Task 9 — Check Claim Tool
+
+### What was built
+
+| File | Role |
+|---|---|
+| `tools/checkClaim.js` | Fact-checker. Searches for evidence, formats articles, asks Gemini for a verdict, returns `{ verdict, reasoning }`. |
+
+### Step-by-step
+
+**Step 1 — webSearch for evidence**
+```js
+const web = await webSearch(claim);
+```
+
+**Step 2 — Format articles with `.map().join()`**
+```js
+const resultWeb = web.map(article => `
+    Title: ${article.title}
+    Description: ${article.description}
+    ...
+`).join("\n");
+```
+Labeled text format reads better for Gemini than raw JSON.
+
+**Step 3 — Ask Gemini for verdict (strict JSON output)**
+```js
+system: `You are a precise fact-checking assistant. Return ONLY valid JSON:
+{ "verdict": "true" | "false" | "uncertain", "reasoning": "one sentence" }`
+message: `Based on the following articles, is this claim accurate: "${claim}"?\n\n${resultWeb}`
+```
+
+**Step 4 — Strip markdown fences, parse JSON, return with fallback**
+```js
+const result = response.replace(/```json\n?/g, '').replace(/```/g, '').trim();
+try { return JSON.parse(result); }
+catch (error) { return { verdict: "uncertain", reasoning: "Could not parse Gemini response." }; }
+```
+
+---
+
+### Mistakes & Fixes
+
+**❌ Wrong: Called `summarize(web)` inside `checkClaim` instead of calling Gemini directly**
+```js
+// Wrong:
+const summary = await summarize(web);  // ← wrong tool, wrong purpose
+// Fixed: call generateContent directly with a verdict prompt
+```
+**Why it was wrong:** `checkClaim` doesn't need to summarize — it needs to make a true/false/uncertain judgment. Those are different tasks that need different prompts. Calling `summarize` here produces a summary, not a verdict.
+
+---
+
+**❌ Wrong: `import { summarize }` — unused and wrong dependency**
+```js
+// Wrong:
+import { summarize } from "./summarize.js";
+// Fixed: removed
+```
+
+---
+
+**❌ Wrong: No return statement — function returned `undefined`**
+```js
+// Wrong: no return at end of function
+// Fixed: return JSON.parse(result);
+```
+**Why it was wrong:** A function without a return statement returns `undefined`. The agent loop would receive `undefined` from `checkClaim`, crash on `JSON.stringify(undefined)`, and inject `undefined` as the Observation.
+
+---
+
+**❌ Wrong: Missing `import { generateContent }` for the Gemini verdict call**
+```js
+// Wrong: no import
+// Fixed:
+import { generateContent } from "../src/geminiClient.js";
+```
+
+---
+
+## Task 10 — Agent Loop: Day 5 Upgrades
+
+### What was fixed
+
+**Fix 1 — Strip quotes from `args`**
+```js
+const cleanArgs = args.replace(/^"|"$/g, '').trim();
+```
+LLM outputs `Action: web_search("query")` with quotes. NewsAPI treats `"query"` as exact phrase match → returns `[]`. Stripping outer quotes fixes it.
+
+**Fix 2 — `Thought:` primer on every iteration (not just first)**
+```js
+const contentsWithPrimer = [
+    ...messages,
+    { role: 'model', parts: [{ text: 'Thought:' }] }
+];
+```
+Without this, the model answered in prose every step instead of calling tools. Adding `Thought:` as the last model turn forces the model to continue in ReAct format.
+
+**Fix 3 — `MAX_STEPS` tuning for free tier**
+Set to `5`. Free tier = 5 calls/minute. Error message changed from hardcoded `"10 steps"` to `${MAX_STEPS}`.
+
+**Fix 4 — `summarize` result not double-stringified**
+`summarize` returns a string. `JSON.stringify(string)` adds outer quotes. Changed to `result = sum` directly.
+
+---
+
+### Mistakes & Fixes
+
+**❌ Wrong: Agent called tools but loop hit max steps before Final Answer**
+
+`MAX_STEPS = 3` wasn't enough. Step 1 always wastes on prose (FORMAT VIOLATION) → Step 2 tool call → Step 3 tool call → loop ends. No step left for Final Answer. Fixed by setting `MAX_STEPS = 5`.
+
+---
+
+**❌ Wrong: `args` passed raw with quotes → NewsAPI returned `[]`**
+
+Observation was `[]` every search. Root cause: model output `Action: web_search("OpenAI GPT-5 release")` where `args = "OpenAI GPT-5 release"` — quotes included. NewsAPI exact-phrase match found nothing. Fixed with regex quote strip.
+
+---
+
+**❌ Wrong: Model answered prose every step — tools never called**
+
+Without the `Thought:` primer on each iteration, the model kept responding in prose. FORMAT VIOLATION was injected but the model ignored the format and answered helpfully in prose again. Fixed by appending `{ role: 'model', parts: [{ text: 'Thought:' }] }` to `contentsWithPrimer` before every Gemini call.
+
+---
+
 ## Day 1 — Format Investigation & Known Limitation
 
 ### The issue
@@ -872,6 +1054,15 @@ Reason: The format problem is not a code problem. It will resolve naturally in *
 | 19 | `agentLoop.js` | Two consecutive `user` turns in `messages` init — Gemini API rejects | High | ✅ Fixed — removed systemPrompt from messages array |
 | 20 | `agentLoop.js` | `message: userQuestion` always used — history array built but never sent to Gemini | Critical | ✅ Fixed — changed to `message: messages` |
 | 21 | `geminiClient.js` | Could not accept array `message` — always wrapped in `{ text: }` causing type mismatch | Critical | ✅ Fixed — added `Array.isArray()` check to detect mode |
+| 22 | `summarize.js` | `system: buildPromptWithTools()` — full ReAct prompt used as summarizer persona | Medium | ✅ Fixed — replaced with short summarizer persona string |
+| 23 | `summarize.js` | `system: prompt, message: text` — instruction in wrong slot, text sent twice | Medium | ✅ Fixed — persona in system, instruction+text in message |
+| 24 | `checkClaim.js` | Called `summarize(web)` instead of Gemini verdict call | High | ✅ Fixed — replaced with `generateContent` + verdict prompt |
+| 25 | `checkClaim.js` | `import { summarize }` — wrong unused dependency | Low | ✅ Fixed — import removed |
+| 26 | `checkClaim.js` | No return statement — function returned `undefined` | High | ✅ Fixed — added `return JSON.parse(result)` with fallback |
+| 27 | `checkClaim.js` | Missing `import { generateContent }` for Gemini verdict call | High | ✅ Fixed — import added |
+| 28 | `agentLoop.js` | `args` passed raw with quotes — NewsAPI exact-phrase match returned `[]` | High | ✅ Fixed — `cleanArgs = args.replace(/^"|"$/g, '').trim()` |
+| 29 | `agentLoop.js` | Model answered prose every step — no tools called | Critical | ✅ Fixed — `Thought:` primer appended to `contentsWithPrimer` every iteration |
+| 30 | `agentLoop.js` | `MAX_STEPS = 3` too low — loop ended before Final Answer | High | ✅ Fixed — set to `5`; error message updated to use `${MAX_STEPS}` |
 
 ---
 

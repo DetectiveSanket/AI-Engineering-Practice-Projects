@@ -70,28 +70,27 @@ rl.on("close", () => {
 
 
 /* 
-    ### ### Day 5 — Add the other two tools (S5 continued)
+    ### Day 6 — Working memory / scratchpad (memory.js)
 
-        > Goal: Agent has all 3 tools. It can choose which one to use.
+        > Goal: Agent has a proper memory system, not just raw messages array.
+
+        ~={orange}Why this matters:=~ As the loop runs, messages array grows. After 5-6 tool calls,
+        you're sending thousands of tokens to Gemini each step. You need to manage this.
 
         Tasks:
-        - [ ] Write tools/summarize.js — function summarize(text)
-        Uses Gemini: "Summarize this in 3 bullet points: [text]"
-        Returns string of bullet points
+        - [ ] Write memory.js with:
+        - addThought(thought) — stores agent's reasoning
+        - addObservation(tool, args, result) — stores what tool returned
+        - getContext(maxTokens) — returns trimmed history that fits in budget
+        - getScratchpad() — returns full scratchpad for debugging
+        - clear() — resets for new question
 
-        - [ ] Write tools/checkClaim.js — function checkClaim(claim)
-        1. Calls webSearch(claim) to get recent articles
-        2. Asks Gemini: "Based on these articles: [articles], is this claim accurate: [claim]?
-            Return JSON: { verdict: 'true'|'false'|'uncertain', reasoning: string }"
-        3. Returns the verdict object
+        - [ ] Trimming strategy: keep last N observations, always keep the original question
+        Estimate: each observation ≈ 500 tokens. Budget: 8000 tokens. Keep last 14 obs.
+        
+        - [ ] Update agentLoop.js to use memory.js instead of raw messages array
 
-        - [ ] Update toolDispatcher.js and agentLoop.js to route to all 3 tools
-
-        - [ ] Test: ask "Is it true that OpenAI released GPT-5?" 
-        Agent should: search → summarize → check claim → final answer
-
-        Definition of done: All 3 tools run without errors. Agent uses at least 2 different
-        tools in one research session.
+        - [ ] Add "scratchpad" CLI command: shows everything the agent has stored this session
 
 
 

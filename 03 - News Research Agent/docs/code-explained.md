@@ -14,6 +14,9 @@
 - [Task 5 — Web Search Tool (`tools/webSearch.js`)](#task-5--web-search-tool-toolswebsearchjs)
 - [Task 6 — Agent Loop (`src/agentLoop.js`)](#task-6--agent-loop-srcagentloopjs)
 - [Task 7 — Gemini Client: Multi-turn Upgrade](#task-7--gemini-client-multi-turn-upgrade)
+- [Task 8 — Summarize Tool (`tools/summarize.js`)](#task-8--summarize-tool-toolssummarizejs)
+- [Task 9 — Check Claim Tool (`tools/checkClaim.js`)](#task-9--check-claim-tool-toolscheckclaim-js)
+- [Task 10 — Agent Loop: Day 5 Upgrades](#task-10--agent-loop-day-5-upgrades)
 - [Day 1 — Format Investigation & Known Limitation](#day-1--format-investigation--known-limitation)
 - [Master Concepts Glossary](#master-concepts-glossary)
 
@@ -752,6 +755,186 @@ if (Array.isArray(prompt.message)) {
 | **`Array.isArray(value)`** | Returns `true` if value is an array. The safest way to check for arrays in JS |
 | **Dual-mode function** | A function that accepts two different input shapes and handles each appropriately |
 | **Primer only for single-turn** | Response priming with `Thought:` is only needed when there's no conversation history |
+
+---
+
+## Task 8 — Summarize Tool (`tools/summarize.js`)
+
+### What this file does and WHY it exists
+
+`summarize.js` is the second tool in the agent's toolkit. When the agent has collected raw text (e.g. a long web article or multiple paragraphs) and wants to condense it, it calls `summarize`. The tool sends the text to Gemini with a single instruction: *"Summarize in 3 bullet points."*
+
+This is the simplest of the three tools: one Gemini call, one string back.
+
+---
+
+### Line-by-line explanation
+
+```js
+import { generateContent } from "../src/geminiClient.js";
+```
+
+Only one import needed — no webSearch, no dispatcher. `summarize` talks directly to Gemini.
+
+```js
+export async function summarize(text) {
+```
+
+Accepts one argument: `text` — any string of content to summarize. The agent passes `args` from the `Action: summarize(...)` line here.
+
+```js
+const response = await generateContent({
+    prompt: {
+        system: "You are a precise summarization assistant. Return only bullet points, no extra text.",
+        message: `Summarize the following in 3 bullet points:\n\n${text}`
+    },
+    config: { temperature: 0.1, topP: 0.95 }
+});
+return response;
+```
+
+- **`system:`** — short persona: *who* Gemini is for this call. Never the full ReAct agent prompt.
+- **`message:`** — the full instruction + content in one string. The text appears exactly once.
+- **`temperature: 0.1`** — very low temperature for deterministic, factual summaries (not creative).
+- Returns the raw string from Gemini — already bullet points, ready to inject as an Observation.
+
+---
+
+### Key concepts introduced in Task 8
+
+| Concept | Plain English |
+|---|---|
+| **`system` vs `message`** | `system` = persona (who you are). `message` = task (what to do). Keep them separate. |
+| **Low temperature for factual tasks** | `0.1` = near-deterministic output. Use low temp for summarization/fact-checking, higher for creative tasks. |
+| **Single-purpose tool** | Each tool does exactly one thing. `summarize` only summarizes — no searching, no parsing. |
+
+---
+
+## Task 9 — Check Claim Tool (`tools/checkClaim.js`)
+
+### What this file does and WHY it exists
+
+`checkClaim.js` is the most complex tool. It acts as an automated fact-checker. Given a claim string (e.g. `"OpenAI released GPT-5"`), it:
+
+1. Searches the web for recent articles about that claim
+2. Formats the articles into readable text
+3. Asks Gemini: *"Based on these articles, is this claim accurate?"*
+4. Returns a structured verdict object: `{ verdict: 'true'|'false'|'uncertain', reasoning: '...' }`
+
+**Why `checkClaim` does its own webSearch internally** (not reusing a previous result):
+The agent loop passes only a plain string (`args`) to each tool. There is no mechanism to pass data between tool calls. Even if `web_search` was called a step earlier, that result is only in the conversation history as text — `checkClaim` can't access it as a JavaScript object. So `checkClaim` fetches its own fresh evidence to evaluate the specific claim.
+
+---
+
+### Line-by-line explanation
+
+```js
+import { webSearch } from "./webSearch.js";
+import { generateContent } from "../src/geminiClient.js";
+```
+
+Two imports: `webSearch` for evidence, `generateContent` for the verdict.
+
+```js
+const web = await webSearch(claim);
+const resultWeb = web.map(article => `
+    Title: ${article.title}
+    Description: ${article.description}
+    URL: ${article.url}
+    Published At: ${article.publishedAt}
+`).join("\n");
+```
+
+- `webSearch(claim)` returns an array of 3 article objects.
+- `.map().join()` converts that array into a single readable text block. This is better than `JSON.stringify` for sending to Gemini — labeled fields read more naturally than raw JSON.
+
+```js
+const response = await generateContent({
+    prompt: {
+        system: `You are a precise fact-checking assistant. Return ONLY valid JSON:
+        { "verdict": "true" | "false" | "uncertain", "reasoning": "one sentence" }`,
+        message: `Based on the following articles, is this claim accurate: "${claim}"?\n\n${resultWeb}`
+    },
+    config: { temperature: 0.1, topP: 0.95 }
+});
+```
+
+The system prompt explicitly tells Gemini to return **only JSON** with a fixed structure. `temperature: 0.1` keeps it strict.
+
+```js
+const result = response.replace(/```json\n?/g, '').replace(/```/g, '').trim();
+try {
+    return JSON.parse(result);
+} catch (error) {
+    return { verdict: "uncertain", reasoning: "Could not parse Gemini response." };
+}
+```
+
+- **Markdown stripping** — Gemini sometimes wraps JSON in ` ```json ... ``` ` code fences. The two `.replace()` calls remove those fences before parsing.
+- **`JSON.parse`** converts the cleaned string into a real JavaScript object `{ verdict, reasoning }`.
+- **`try/catch` fallback** — if parsing fails for any reason, returns a safe default object instead of crashing the agent loop.
+
+---
+
+### Key concepts introduced in Task 9
+
+| Concept | Plain English |
+|---|---|
+| **Self-contained tool** | Each tool manages its own data fetching — it doesn't rely on previous tool results |
+| **`.map().join()`** | Converts array of objects into a single readable text block for LLM consumption |
+| **Markdown stripping** | Removing ` ```json ``` ` fences Gemini sometimes adds around JSON responses |
+| **Structured JSON output** | Asking Gemini to return strict JSON so the result is machine-readable, not just human-readable |
+| **Graceful JSON parse fallback** | `try/catch` around `JSON.parse` prevents crashes when Gemini's output isn't clean JSON |
+
+---
+
+## Task 10 — Agent Loop: Day 5 Upgrades
+
+### What changed and WHY
+
+Three targeted fixes made the agent loop production-ready:
+
+**Fix 1 — Strip quotes from `args` before all tool calls**
+
+```js
+const cleanArgs = args.replace(/^"|"$/g, '').trim();
+```
+
+The LLM sometimes wraps action arguments in double quotes: `Action: web_search("OpenAI GPT-5")`. This means `args` received by the loop is `"OpenAI GPT-5"` — with the quotes as part of the string. NewsAPI treats a quoted string as an **exact phrase match**, which is too strict and often returns `[]`. Stripping the outer quotes converts it to a normal keyword search.
+
+All three tool cases now use `cleanArgs` instead of `args`.
+
+**Fix 2 — `Thought:` primer injected every iteration**
+
+```js
+const contentsWithPrimer = [
+    ...messages,
+    { role: 'model', parts: [{ text: 'Thought:' }] }
+];
+```
+
+The primer (`Thought:`) is appended to the messages array before every Gemini call. The model is a text completer — it **must** continue from whatever the model turn ends with. Starting the model turn with `Thought:` forces it into the ReAct format on every step.
+
+This solved the core loop problem where the model kept answering in prose instead of using tools.
+
+**Fix 3 — `MAX_STEPS` and rate limit management**
+
+Free tier allows 5 Gemini requests/minute. The agent was hitting 429 errors with `MAX_STEPS = 10`. Set to `5` — enough for: 1 prose step + 2–3 tool calls + 1 Final Answer step. Error message updated to use `${MAX_STEPS}` dynamically.
+
+**Fix 4 — `summarize` result not double-stringified**
+
+`summarize` returns a plain string. Wrapping it in `JSON.stringify` added extra outer quotes, making the Observation look like `"\u2022 Point 1\n\u2022 Point 2"`. Changed to pass the string directly as `result`.
+
+---
+
+### Key concepts introduced in Task 10
+
+| Concept | Plain English |
+|---|---|
+| **Regex `^"|"$`** | Matches a double-quote at the very start (`^`) or very end (`$`) of a string |
+| **Primer on every iteration** | Spreading `...messages` and adding a model turn forces ReAct format each step, not just the first |
+| **Rate limit (429)** | HTTP status 429 = "Too Many Requests". Free Gemini tier = 5 calls/minute |
+| **`MAX_STEPS` tuning** | Setting step cap based on API quota — a production concern, not just a safety guard |
 
 ---
 
