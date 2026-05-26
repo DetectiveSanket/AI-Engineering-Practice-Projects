@@ -18,6 +18,7 @@
 - [Task 9 — Check Claim Tool](#task-9--check-claim-tool)
 - [Task 10 — Agent Loop: Day 5 Upgrades](#task-10--agent-loop-day-5-upgrades)
 - [Task 11 — Working Memory & Agent Robustness: Day 6 Upgrades](#task-11--working-memory--agent-robustness-day-6-upgrades)
+- [Task 12 — Context Engineering: Day 7 Upgrades](#task-12--context-engineering-day-7-upgrades)
 - [Day 1 — Format Investigation & Known Limitation](#day-1--format-investigation--known-limitation)
 - [Bug Log](#bug-log)
 - [Glossary](#glossary)
@@ -948,6 +949,86 @@ With `MAX_STEPS = 5`, a format violation on Step 1 meant only 4 steps were left,
 
 ---
 
+## Task 12 — Context Engineering: Day 7 Upgrades
+
+### What was fixed
+
+**Fix 1 — `buildPromptWithTools` accepts `memoryContext`**
+Added optional `memoryContext = null` parameter. When `null`, returns the static base prompt (backwards compatible). When a scratchpad object is passed, a dynamic `brief` section is appended summarising the current research state.
+
+**Fix 2 — Dynamic Research Brief**
+The brief lists the original question, all topics already searched, and a 150-char preview of each observation result. The `⛔ HARD STOP` instruction prevents the model from repeating searches on already-covered topics.
+
+**Fix 3 — Urgency Notice with step-awareness**
+A `URGENCY_THRESHOLD = MAX_STEPS - 2` constant fires a mandatory FINAL INSTRUCTION 2 steps before the budget runs out. It tells the model the exact steps remaining and explicitly forbids further tool calls.
+
+**Fix 4 — `buildPromptWithTools` moved inside the loop**
+`agentLoop.js` now calls `memory.getScratchpad()` then `buildPromptWithTools(currentMemory)` on **every iteration** of the while loop. The system prompt is no longer static — it is freshly generated from the latest memory state every step.
+
+**Fix 5 — `MAX_STEPS` aligned across both files**
+Both `agentLoop.js` and `contextBuilder.js` now define `MAX_STEPS = 7`. The contextBuilder mirrors this value to make urgency math correct: `URGENCY_THRESHOLD = MAX_STEPS - 2 = 5`.
+
+---
+
+### Mistakes & Fixes
+
+**❌ Wrong: `memoryContext.memoryContext` — property name did not exist**
+
+First implementation used `memoryContext.memoryContext` and `memoryContext.stepsUsed` but `getScratchpad()` returned `{ observation, steps }`, not `{ memoryContext, stepsUsed }`.
+* **Fixed:** Renamed the keys in `getScratchpad()` to `{ memoryObservation, stepsUsed }` to match the expected names in `contextBuilder.js`.
+
+---
+
+**❌ Wrong: `systemPrompt` declared outside the loop — static, never updated**
+
+```js
+// Wrong:
+const systemPrompt = buildPromptWithTools(memory.getScratchpad()); // ← called once, never again
+while (steps < MAX_STEPS) { ... }
+```
+The system prompt was evaluated once at the start of `runAgent()`. After that, even though memory grew with each step, Gemini kept seeing the same initial (empty) brief with no observations.
+* **Fixed:** Moved the call inside the `while` loop so it re-evaluates on every iteration.
+
+---
+
+**❌ Wrong: `memory.getScratchpad()` called BEFORE `memory.clear()`**
+
+```js
+// Wrong:
+const systemPrompt = buildPromptWithTools(memory.getScratchpad()); // ← reads previous session!
+memory.clear();
+```
+This caused the system prompt for a new question to be built from the **previous question's observations** — state bleed at the system prompt level.
+* **Fixed:** `memory.clear()` and `memory.setQuestion()` are always called before any `getScratchpad()` read.
+
+---
+
+**❌ Wrong: `MAX_STEPS = 3` in `contextBuilder.js` — misaligned with `agentLoop.js`**
+
+The urgency threshold was calculated as `stepsUsed >= MAX_STEPS`. With `MAX_STEPS = 3` locally but `MAX_STEPS = 7` in `agentLoop.js`, the urgency fired at step 3 of a 7-step budget — way too early.
+* **Fixed:** Changed to `MAX_STEPS = 7` and `URGENCY_THRESHOLD = MAX_STEPS - 2 = 5`, which fires 2 steps before budget exhaustion.
+
+---
+
+**❌ Wrong: `❌ MISSING: "..."` text literal pasted into system prompt**
+
+During development, a reviewer note (`❌ MISSING: "After 2 tool calls..."`) was accidentally placed inside the template literal of the base prompt instead of the actual rule text.
+* **Fixed:** Replaced with the actual rule: `- After 2 tool calls you MUST move toward a Final Answer`.
+
+---
+
+**❌ Wrong: Urgency notice placed before `brief` — model reads it before knowing what it found**
+
+```js
+// Wrong:
+return base + urgencyNotice + "\n\n" + brief;
+// Fixed:
+return base + "\n\n" + brief + urgencyNotice;
+```
+LLMs give more weight to instructions at the **end** of a prompt. Placing the urgency notice before the research brief means the model is urgency-warned before it even reads what it found. Swapping the order makes it the final statement before the model generates a response.
+
+---
+
 ## Day 1 — Format Investigation & Known Limitation
 
 ### The issue
@@ -1111,6 +1192,11 @@ Reason: The format problem is not a code problem. It will resolve naturally in *
 | 31 | `agentLoop.js` | Time-cutoff confusion — agent assumed search results from 2025/2026 were hallucinations | Critical | ✅ Fixed — dynamically inject today's date in `contextBuilder.js` and add a hard `TRUST` rule |
 | 32 | `agentLoop.js` | Step budget starvation — wasted format correction steps left no room for final synthesis | High | ✅ Fixed — bumped `MAX_STEPS` to `7` to provide ample synthesis buffer |
 | 33 | `agentLoop.js` & `webSearch.js` | Developer blindness — unable to see what the search tool returned or what Gemini read | Medium | ✅ Fixed — added detailed step-by-step raw console logging for prompt contexts, API search result titles, and saved observations |
+| 34 | `contextBuilder.js` | `memoryContext.memoryContext` — property name mismatch, `.map()` crash on `undefined` | Critical | ✅ Fixed — renamed `getScratchpad()` return keys to `{ memoryObservation, stepsUsed }` |
+| 35 | `agentLoop.js` | `systemPrompt` declared outside loop — static, never updated across steps | Critical | ✅ Fixed — moved `getScratchpad()` + `buildPromptWithTools()` call inside `while` loop |
+| 36 | `contextBuilder.js` | `MAX_STEPS = 3` locally vs `MAX_STEPS = 7` in agentLoop — urgency fired at wrong step | High | ✅ Fixed — mirrored to `7`, added `URGENCY_THRESHOLD = MAX_STEPS - 2` |
+| 37 | `contextBuilder.js` | Reviewer comment `❌ MISSING:` pasted verbatim into system prompt template literal | Medium | ✅ Fixed — replaced with actual rule text |
+| 38 | `contextBuilder.js` | `urgencyNotice` positioned before `brief` — model urgency-warned before reading its own findings | Low | ✅ Fixed — swapped order: `base + brief + urgencyNotice` |
 
 ---
 
@@ -1134,6 +1220,11 @@ Reason: The format problem is not a code problem. It will resolve naturally in *
 | **Response priming** | Giving the model a partial start to its own response so it completes in a specific format |
 | **Model-turn prefill** | Injecting a partial `role:'model'` turn at the end of a `contents` array to prime the response |
 | **Multi-turn `contents`** | Passing `[{role:'user',...},{role:'model',...}]` to represent a conversation instead of a plain string |
-| **State bleed** | When context or data from a previous agent execution carries over to the next session, leading to unexpected errors or incorrect context. Prevented by calling `clear()` on session startup. |
-| **Dynamic date injection** | Dynamically appending today's actual calendar date to system instructions so the model can correctly reason about time-sensitive searches instead of dismissing future dates as hallucinations. |
-| **Token budget management** | Strategically truncating or trimming large payloads (e.g. slicing tool results or removing older thoughts/observations) to prevent model context window overflow or high costs. |
+| **State bleed** | When context or data from a previous agent execution carries over to the next session. Prevented by calling `clear()` on session startup. |
+| **Dynamic date injection** | Dynamically appending today's actual calendar date to system instructions so the model correctly reasons about time-sensitive searches. |
+| **Token budget management** | Strategically truncating or trimming large payloads to prevent model context window overflow or high costs. |
+| **Context Engineering** | Dynamically composing the system prompt from live agent state so it adapts to what the agent has already done. |
+| **Research Brief** | A section of the system prompt summarising the agent's current findings to prevent re-searching covered topics. |
+| **Deduplication Guard** | A hard-stop instruction telling the model it cannot repeat a search it has already performed. |
+| **Urgency Notice** | A mandatory instruction injected near the end of the step budget forcing the model to stop calling tools and write a Final Answer. |
+| **Mirrored constant** | A constant defined in two files that must stay in sync — changing one requires changing both. |

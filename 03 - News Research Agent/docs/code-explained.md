@@ -18,6 +18,7 @@
 - [Task 9 — Check Claim Tool (`tools/checkClaim.js`)](#task-9--check-claim-tool-toolscheckclaim-js)
 - [Task 10 — Agent Loop: Day 5 Upgrades](#task-10--agent-loop-day-5-upgrades)
 - [Task 11 — Working Memory & Agent Robustness: Day 6 Upgrades](#task-11--working-memory--agent-robustness-day-6-upgrades)
+- [Task 12 — Context Engineering: Day 7 Upgrades](#task-12--context-engineering-day-7-upgrades)
 - [Day 1 — Format Investigation & Known Limitation](#day-1--format-investigation--known-limitation)
 - [Master Concepts Glossary](#master-concepts-glossary)
 
@@ -1010,6 +1011,99 @@ Two critical issues were resolved to ensure the agent reliably answers modern, t
 | **State Bleed** | An agent bug where previous queries/context bleed into the new session. Resolved by running a `.clear()` cleanup on startup. |
 | **Dynamic Date Injection** | Injecting the current live system date into instructions so that the LLM is time-aware and correctly processes future dates returned by web tools. |
 | **Format Priming** | A prompt engineering technique where we append a model-turn prefill (like `Thought:`) to force the LLM to complete the turn in the required format. |
+
+---
+
+## Task 12 — Context Engineering: Day 7 Upgrades
+
+### What changed and WHY
+
+Day 7 upgrades the system prompt from a **static set of rules** into a **dynamic, state-aware research brief** that evolves on every loop iteration. This is the "Context Engineering" chapter made real — the agent now knows what it has already done and self-corrects its behaviour based on progress.
+
+#### 1. `buildPromptWithTools()` now accepts `memoryContext`
+
+The function signature changed from zero arguments to optional `memoryContext`:
+
+```javascript
+export function buildPromptWithTools(memoryContext = null) {
+    // ...
+    if (!memoryContext) return base;  // ← backwards compatible: Day 1–6 callers still work
+    // ...
+}
+```
+
+The `= null` default makes it **backwards compatible** — any caller that doesn't pass memory still gets the base prompt. This is good API design.
+
+#### 2. Dynamic Research Brief injected into every step
+
+After the base rules, a `brief` section is appended that summarises the current session state:
+
+```javascript
+const brief = `
+    Current research state (step : ${memoryContext.stepsUsed}):
+        - Original question : ${memoryContext.question}
+        - Topics already searched : ${searchedTopics}
+        - Observations so far:
+          ${memoryContext.memoryObservation.map(o =>
+              ` - [${o.tool}(${o.args})]: ${o.result.slice(0, 150)}...`
+          ).join('\n')}
+        - HARD STOP: The topics listed above have ALREADY been searched.
+          You MUST either search a COMPLETELY DIFFERENT angle OR write your Final Answer now.
+`;
+```
+
+This prevents the agent from searching the same thing twice — by explicitly listing what it already searched with its results, the model has a concrete record to check before forming a new query.
+
+#### 3. Step-Aware Urgency Notice
+
+A `urgencyNotice` is computed each iteration. Once the agent has used `MAX_STEPS - 2` steps, a **mandatory stop instruction** is injected:
+
+```javascript
+const URGENCY_THRESHOLD = MAX_STEPS - 2; // fire with 2 steps remaining
+
+const urgencyNotice = memoryContext.stepsUsed >= URGENCY_THRESHOLD
+    ? `\n\nFINAL INSTRUCTION (MANDATORY): You have used ${memoryContext.stepsUsed} steps.
+       Only ${MAX_STEPS - memoryContext.stepsUsed} steps remain. STOP calling tools.
+       You MUST write your Final Answer NOW using the observations above.`
+    : "";
+```
+
+This is appended **after** the brief — the last thing the model reads before generating a response. Position matters: a final instruction placed at the very end carries more weight than one buried in the middle.
+
+#### 4. `MAX_STEPS` mirrored between both files
+
+A local `const MAX_STEPS = 7` is declared inside `buildPromptWithTools`. It mirrors the same constant in `agentLoop.js`. This way the urgency math (`MAX_STEPS - stepsUsed`) is always accurate — if you change the step limit in `agentLoop.js`, you update the mirror here too.
+
+#### 5. `agentLoop.js` — Dynamic prompt generated inside the loop
+
+Moving the `buildPromptWithTools` call inside the `while` loop is the architectural change that enables everything:
+
+```javascript
+while (steps < MAX_STEPS) {
+    const context = memory.getContext(10);       // ← 1. get trimmed context
+    steps++;
+    
+    const currentMemory = memory.getScratchpad(); // ← 2. snapshot current state
+    const systemPrompt = buildPromptWithTools(currentMemory); // ← 3. build fresh prompt
+    
+    // ... send to Gemini ...
+}
+```
+
+Each iteration: read memory → build dynamic prompt → send to Gemini → store result → repeat. The prompt **grows smarter** as the agent discovers more.
+
+---
+
+### Key concepts introduced in Task 12
+
+| Concept | Plain English |
+|---|---|
+| **Context Engineering** | Dynamically composing the system prompt from live state instead of hardcoding it. The prompt becomes a function of what the agent has done so far. |
+| **Research Brief** | A section of the system prompt that summarises the agent's current findings — prevents re-searching already-covered topics. |
+| **Deduplication Guard** | A hard-stop instruction in the prompt telling the model it cannot repeat a search it has already performed. |
+| **Urgency Notice** | A mandatory instruction injected late in the loop that forces the model to stop calling tools and write a Final Answer before the step budget runs out. |
+| **Mirrored constant** | A constant defined in two files that must stay in sync — here `MAX_STEPS` in `agentLoop.js` and `contextBuilder.js`. Change one, change both. |
+| **Backwards compatibility** | Using `= null` default parameter so existing callers don't break when a function's signature is extended. |
 
 ---
 

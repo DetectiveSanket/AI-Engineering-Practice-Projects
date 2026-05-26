@@ -8,6 +8,7 @@ const scratchpad = {
 };
 
 export function setQuestion(q) {
+    clear();
     scratchpad.question = q;
 }
 
@@ -68,8 +69,8 @@ export function getScratchpad() {
     return {
         question: scratchpad.question,
         thoughts: [...scratchpad.thoughts],
-        observation: [...scratchpad.observation],
-        steps: scratchpad.steps
+        memoryObservation: [...scratchpad.observation], 
+        stepsUsed: scratchpad.steps                   
     };
 }
 

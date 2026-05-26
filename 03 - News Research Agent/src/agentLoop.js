@@ -14,13 +14,14 @@ export async function runAgent(question ) {
     console.log("Que is : " , question);
 
     const userQuestion = `Research question: ${question}`;
-    const systemPrompt = buildPromptWithTools();
-
     memory.clear();                      // reset previous session — prevents bleed between questions
     memory.setQuestion(userQuestion);    // store the new question
 
+    // const systemPrompt = buildPromptWithTools(memory.getScratchpad());
+
+
     
-    const MAX_STEPS = 7; // Step 1 wasted on prose + 2-3 tool calls + Final Answer needs at least 1 step buffer
+    const MAX_STEPS = 7; // Budget: 1 wasted (prose) + 2-3 tool calls + 1 urgency warn + 1-2 Final Answer steps
     let steps = 0;
     
     while (steps < MAX_STEPS) {
@@ -28,19 +29,12 @@ export async function runAgent(question ) {
 
         steps++;
         console.log(`\n--- Step ${steps} ---`);
-        
-        // Hint — in agentLoop.js, before calling generateContent:
-        // const contentsWithPrimer = [
-        //     context,
-        //     { role: 'model', parts: [{ text: 'Thought:' }] }  // ← forces model to continue from here
-        // ];
-
 
         // ─── DEBUG: what context is Gemini seeing this step? ────────────────────
-        console.log('\n🧠 CONTEXT SENT TO GEMINI:');
-        console.log('-------------------------------------------');
-        console.log(context);
-        console.log('-------------------------------------------\n');
+        // console.log('\n🧠 CONTEXT SENT TO GEMINI:');
+        // console.log('-------------------------------------------');
+        // console.log(context);
+        // console.log('-------------------------------------------\n');
         // ────────────────────────────────────────────────────────────────
 
         // Build context string from memory — updated every iteration with latest observations
@@ -48,6 +42,13 @@ export async function runAgent(question ) {
             { role: 'user',  parts: [{ text: context }] },            // full scratchpad context
             { role: 'model', parts: [{ text: 'Thought:' }] }         // primer — forces ReAct format
         ];
+
+        // 1. Get the current scratchpad state
+        const currentMemory = memory.getScratchpad();
+        
+        // 2. Generate the fresh dynamic system prompt
+        const systemPrompt = buildPromptWithTools(currentMemory);
+
 
         // Then pass contentsWithPrimer instead of messages:
         const response = await generateContent({
@@ -62,9 +63,9 @@ export async function runAgent(question ) {
         })
 
         // ─── DEBUG: full model response ─────────────────────────────────────
-        console.log('🤖 GEMINI RAW RESPONSE:');
-        console.log(response);
-        console.log('───────────────────────────────────────────\n');
+        // console.log('🤖 GEMINI RAW RESPONSE:');
+        // console.log(response);
+        // console.log('───────────────────────────────────────────\n');
         // ────────────────────────────────────────────────────────────────
 
         // Add response to memory
@@ -133,9 +134,9 @@ export async function runAgent(question ) {
         }
 
         // ─── DEBUG: what observation is stored? ─────────────────────────────
-        console.log(`💾 OBSERVATION STORED IN MEMORY [${tool}]:`);
-        console.log(result.slice(0, 400));
-        console.log('...(truncated)');
+        // console.log(`💾 OBSERVATION STORED IN MEMORY [${tool}]:`);
+        // console.log(result.slice(0, 400));
+        // console.log('...(truncated)');
         // ────────────────────────────────────────────────────────────────
 
         // Add observation to memory

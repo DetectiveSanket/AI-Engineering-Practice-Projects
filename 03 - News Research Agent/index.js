@@ -74,28 +74,16 @@ rl.on("close", () => {
 
 
 /* 
-    ### Day 6 — Working memory / scratchpad (memory.js)
+    ### Day 7 — Context engineering (contextBuilder.js upgrades)
+        Goal: System prompt is dynamic — it adapts based on what the agent has found so far.
 
-        > Goal: Agent has a proper memory system, not just raw messages array.
-
-        ~={orange}Why this matters:=~ As the loop runs, messages array grows. After 5-6 tool calls,
-        you're sending thousands of tokens to Gemini each step. You need to manage this.
+        This is where the book's "Context Engineering" chapter becomes real.
 
         Tasks:
-        - [ ] Write memory.js with:
-        - addThought(thought) — stores agent's reasoning
-        - addObservation(tool, args, result) — stores what tool returned
-        - getContext(maxTokens) — returns trimmed history that fits in budget
-        - getScratchpad() — returns full scratchpad for debugging
-        - clear() — resets for new question
-
-        - [ ] Trimming strategy: keep last N observations, always keep the original question
-        Estimate: each observation ≈ 500 tokens. Budget: 8000 tokens. Keep last 14 obs.
-        
-        - [ ] Update agentLoop.js to use memory.js instead of raw messages array
-
-        - [ ] Add "scratchpad" CLI command: shows everything the agent has stored this session
-
+        - [ ] Update buildSystemPrompt() to accept current memory state
+        - [ ] Inject: how many steps used, what topics have been searched, quality so far
+        - [ ] Add a "research brief" section: "So far you have found: [summary of observations]"
+        - [ ] This prevents the agent from searching the same thing twice
 
 
 */
