@@ -6,7 +6,7 @@ import {generateContent} from './geminiClient.js';
 import { buildPromptWithTools } from "./contextBuilder.js";
 import { parseAction, isFinalAnswer, extractFinalAnswer } from "./toolDispatcher.js";
 import * as memory from './memory.js';
-
+import { buildReport, saveReport, buildReportText } from './reportBuilder.js';
 
 
 export async function runAgent(question ) {
@@ -74,7 +74,18 @@ export async function runAgent(question ) {
 
         // 2. Check for Final Answer
         if(isFinalAnswer(response)) {
-            return extractFinalAnswer(response);
+            const ans = extractFinalAnswer(response);
+
+           // Build the final report from scratchpad + answer
+            const report = buildReport(userQuestion, ans, memory.getScratchpad());
+
+            // Print formatted report
+            console.log('\n' + buildReportText(report));
+
+            // Save JSON
+            await saveReport(report);  // you'll write saveReport() next
+
+            return ans; // return answer so CLI can print it too
         }
 
         // 3. Parse for Action

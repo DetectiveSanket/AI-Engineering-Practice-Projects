@@ -74,6 +74,19 @@ export function getScratchpad() {
     };
 }
 
+export function getSources() {
+    return scratchpad.observation.filter(o => o.tool === 'web_search').map(o => ({
+        title: o.result?.title,
+        url: o.result?.url
+    }));
+}
+
+export function getToolsUsed() {
+    return scratchpad.observation.map(o => o.tool);
+}
+
+
+
 export function clear() {
     scratchpad.question = "";
     scratchpad.thoughts = [];

@@ -74,16 +74,25 @@ rl.on("close", () => {
 
 
 /* 
-    ### Day 7 — Context engineering (contextBuilder.js upgrades)
-        Goal: System prompt is dynamic — it adapts based on what the agent has found so far.
+    ### Day 8 — Report builder (S6: reportBuilder.js)
 
-        This is where the book's "Context Engineering" chapter becomes real.
+    > Goal: Final answer is structured and readable, not just raw text.
 
-        Tasks:
-        - [ ] Update buildSystemPrompt() to accept current memory state
-        - [ ] Inject: how many steps used, what topics have been searched, quality so far
-        - [ ] Add a "research brief" section: "So far you have found: [summary of observations]"
-        - [ ] This prevents the agent from searching the same thing twice
+    Tasks:
+    - [ ] Write reportBuilder.js — function buildReport(question, answer, scratchpad)
+    - [ ] Report structure:
+    {
+        question: string,
+        answer: string,
+        sources: [{ title, url }],
+        stepsUsed: number,
+        toolsUsed: [string],
+        generatedAt: ISO timestamp
+    }
+    - [ ] Print to terminal: formatted readable version
+    - [ ] Save to reports/report-[timestamp].json
+    - [ ] Add "report" command to CLI: shows last saved report
+
 
 
 */
