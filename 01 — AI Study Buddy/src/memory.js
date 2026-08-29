@@ -39,9 +39,10 @@ export function addTopic(topic) {
 export function getHistory(){
 
     // VERSION A (your uncommented — what you kept):
-    return session.topic;
+    return session.topic; 
         // Returns: [ { topic: "Java", timestamp: 173... }, { topic: "Python", timestamp: 174... } ]
         // This is an ARRAY OF OBJECTS.
+   // return session.topic.map(t => t.topic); --> more specific only get topics not others thinks from topic array in session object     
 
     // VERSION B (your commented out):
     // return session.topic.map(t => t.topic);

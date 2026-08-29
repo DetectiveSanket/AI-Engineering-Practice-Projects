@@ -31,7 +31,6 @@ export function buildReport(question, answer, scratchpad) {
         stepUsed:scratchpad.step,
         toolUsed:scratchpad.toolsUsed,
         generatedAt: new Date().toISOString(),
-
     }
     return report;
 }

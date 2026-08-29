@@ -14,7 +14,6 @@ config({ path: join(__dirname, "..", ".env") });
 // The SDK can also read GOOGLE_API_KEY automatically if set, 
 // but we'll be explicit as per the user's request for "automatic from .env"
 
-
 const client = new GoogleGenAI({
     apiKey: process.env.GEMINI_API_KEY
 });
@@ -27,7 +26,7 @@ const client = new GoogleGenAI({
  * @param {Object} options.config - Generation config (temperature, etc.)
  */
 // export async function generateContent({ model = 'gemini-3-flash-preview', prompt, config = {} }) {
-export async function generateContent({ model = 'gemini-2.5-flash', prompt, config = {} , history = []}) {
+export async function generateContent({ model = 'gemini-2.5-flash', prompt, config = {}, history = [] }) {
 
     try {
 
@@ -43,19 +42,23 @@ export async function generateContent({ model = 'gemini-2.5-flash', prompt, conf
             // contents: prompt.message,  
 
             systemInstruction: prompt.system,
-            contents:[
-                        ...history,
-                        {
-                            role:"user" , 
-                            parts:[{ 
-                                text : prompt.message
-                            }]
-                        }
-                    ], 
+            contents: [
+                ...history,
+                {
+                    role: "user",
+                    parts: [{
+                        text: prompt.message
+                    }]
+                }
+            ],
+
+            thinkingConfig: { // This will help to increase the thinking capability of Gemini by adjusting the thinkingbudget
+                thinkingBudget: 1000,
+            },
 
             generationConfig: {
-                temperature: config.temperature ?? 0.6,
-                topP: config.topP ?? 0.95,
+                temperature: config.temperature ?? 0.5,
+                topP: config.topP ?? 0.7,
                 maxOutputTokens: config.maxOutputTokens ?? 800,
             },
 
@@ -71,7 +74,7 @@ export async function generateContent({ model = 'gemini-2.5-flash', prompt, conf
 
         // The SDK might return a function or a string; we ensure it's a string
         return typeof response.text === 'function' ? response.text() : response.text;
-        
+
     } catch (error) {
         console.error("Gemini API Error:", error.message);
         throw error;
