@@ -19,6 +19,7 @@
 - [Task 10 — Agent Loop: Day 5 Upgrades](#task-10--agent-loop-day-5-upgrades)
 - [Task 11 — Working Memory & Agent Robustness: Day 6 Upgrades](#task-11--working-memory--agent-robustness-day-6-upgrades)
 - [Task 12 — Context Engineering: Day 7 Upgrades](#task-12--context-engineering-day-7-upgrades)
+- [Task 13 — Report Builder: Day 8 (`src/reportBuilder.js` + `index.js`)](#task-13--report-builder-day-8)
 - [Day 1 — Format Investigation & Known Limitation](#day-1--format-investigation--known-limitation)
 - [Master Concepts Glossary](#master-concepts-glossary)
 
@@ -1107,7 +1108,160 @@ Each iteration: read memory → build dynamic prompt → send to Gemini → stor
 
 ---
 
-## Day 1 — Format Investigation & Known Limitation
+## Task 13 — Report Builder: Day 8
+
+### What was built and WHY it exists
+
+Until Day 8, the agent produced a raw `Final Answer` string — printed to the terminal and immediately forgotten. Nothing was saved, nothing was structured. `reportBuilder.js` closes that gap: it takes everything the agent collected during a session (question, answer, sources, tools used, step count) and packages it as both a **structured JSON file on disk** and a **readable terminal printout**.
+
+Three exported functions:
+
+| Function | Input | Output |
+|---|---|---|
+| `buildReport(question, answer, scratchpad)` | Raw scratchpad state | Structured report object |
+| `saveReport(report)` | Report object | Writes JSON to `reports/` folder, returns file path |
+| `buildReportText(report)` | Report object | Formatted string for terminal printing |
+
+The `report` CLI command in `index.js` lets you re-read the latest saved report at any time without re-running the agent.
+
+---
+
+### `buildReport()` — line by line
+
+#### Sources extraction
+
+```js
+const sources = scratchpad.memoryObservation
+    .filter(obs => obs.tool === 'web_search')
+    .flatMap(obs => {
+        try {
+            const articles = JSON.parse(obs.result);
+            return articles.map(a => ({ title: a.title, url: a.url }));
+        } catch {
+            return [];
+        }
+    })
+    .filter(s => s.title && s.url);
+```
+
+The key insight: `obs.result` is a **JSON string**, not an object. In `agentLoop.js`, `result = JSON.stringify(web)` was called before storing it in memory. So you must `JSON.parse(obs.result)` to get the array of articles back. Only `web_search` observations contain article arrays — `summarize` and `check_claim` results look completely different.
+
+- **`.filter(obs => obs.tool === 'web_search')`** — isolate only the search observations
+- **`.flatMap(...)`** — parse each observation's JSON string and flatten all articles into one array
+- **`try/catch`** — graceful fallback if result can't be parsed (corrupt or truncated)
+- **Final `.filter()`** — drop any article entries missing both title and url
+
+#### Tools used
+
+```js
+const toolsUsed = scratchpad.memoryObservation.map(obs => obs.tool);
+```
+
+The property in each observation is `tool` (set by `memory.addObservation(tool, args, result)`). A common mistake is `obs.toolName` — that property does not exist.
+
+#### Key names
+
+```js
+const report = {
+    sources:   sources,             // plural
+    stepsUsed: scratchpad.stepsUsed, // from getScratchpad()
+    toolsUsed: toolsUsed,           // plural
+};
+```
+
+All three keys are **plural and consistent** with what `buildReportText()` reads. A mismatch here silently produces `undefined` in the terminal output.
+
+---
+
+### `saveReport()` — saving JSON to disk
+
+```js
+const reportDir = path.join(__dirname, '../reports');
+await fs.promises.mkdir(reportDir, { recursive: true });
+```
+
+- **`__dirname`** here is `src/` (because `reportBuilder.js` lives in `src/`). `../reports` navigates up one level to the project root, then into `reports/`.
+- **`{ recursive: true }`** — does not throw if the directory already exists. Safe to call every time.
+
+```js
+const timestamp = new Date().toISOString().replace(/[-:T.]/g, '').slice(0, 14);
+const filename = `report-${timestamp}.json`;
+```
+
+- **`replace(/[-:T.]/g, '')`** — strips all `-`, `:`, `T`, `.` characters from the ISO string.
+- **`.slice(0, 14)`** — keeps only `YYYYMMDDHHMMSS` (14 digits). Result: `report-20260830121530.json`.
+- Alphabetical sort of these filenames = chronological sort — this is what the `report` CLI command exploits.
+
+---
+
+### `buildReportText()` — terminal formatting
+
+```js
+const sourceLines = report.sources.map(s =>
+    `        • ${s.title}\n          ${s.url}`
+).join('\n');
+```
+
+Converts the sources array into a bulleted list with the title on one line and the URL indented below it. The `========` borders give it a visible block structure in the terminal.
+
+---
+
+### `report` CLI command — `index.js`
+
+```js
+if (userInput.toLowerCase() === 'report') {
+    const reportsDir = path.join(__dirname, 'reports');
+    const files = fs.readdirSync(reportsDir)
+        .filter(f => f.endsWith('.json'))
+        .sort()
+        .reverse();
+    const raw = fs.readFileSync(path.join(reportsDir, files[0]), 'utf-8');
+    const report = JSON.parse(raw);
+    console.log(buildReportText(report));
+    continue;
+}
+```
+
+- **`fs.readdirSync()`** — synchronous directory read. Fine here because this is a one-off CLI command, not a hot path.
+- **`.sort().reverse()`** — filenames are `report-YYYYMMDDHHMMSS.json`, so alphabetical = chronological. Reversing puts the newest first.
+- **`files[0]`** — the most recent report.
+- **`ENOENT` catch** — if the `reports/` directory doesn't exist yet (no query has run), prints a friendly message instead of crashing.
+
+---
+
+### Import cleanup in `reportBuilder.js`
+
+Original had fragmented imports — `import { fileURLToPath }` and `import { dirname }` placed in the middle of the file after executable code. ES Modules require all `import` statements to be at the **top level** before any executable statements.
+
+Final clean import block:
+```js
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+```
+
+`dirname` is no longer a separate named import — `path.dirname()` is used instead since `path` was already imported.
+
+---
+
+### Key concepts introduced in Task 13
+
+| Concept | Plain English |
+|---|---|
+| **`JSON.parse(obs.result)`** | Tool results are stored as JSON strings in memory. You must parse them back before reading properties. |
+| **`.flatMap()`** | Like `.map()` but flattens one level — useful when each item maps to an array (each observation → multiple articles) |
+| **`fs.promises.mkdir({ recursive: true })`** | Creates a directory and all parent dirs. Does not throw if it already exists. |
+| **Timestamp filename** | `YYYYMMDDHHMMSS` format sorts alphabetically = chronologically — no date parsing needed |
+| **`fs.readdirSync().sort().reverse()`** | Synchronous directory listing sorted newest-first by filename — works because filename encodes time |
+| **Import placement** | All `import` statements must appear at the top level of an ES Module before any executable code |
+| **`path.dirname()` vs `import { dirname }`** | Both work. If `path` is already imported, `path.dirname()` avoids an extra named import |
+
+---
+
+
 
 ### What was expected vs. what happened
 

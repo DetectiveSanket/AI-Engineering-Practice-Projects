@@ -19,6 +19,7 @@
 - [Task 10 — Agent Loop: Day 5 Upgrades](#task-10--agent-loop-day-5-upgrades)
 - [Task 11 — Working Memory & Agent Robustness: Day 6 Upgrades](#task-11--working-memory--agent-robustness-day-6-upgrades)
 - [Task 12 — Context Engineering: Day 7 Upgrades](#task-12--context-engineering-day-7-upgrades)
+- [Task 13 — Report Builder: Day 8 Upgrades](#task-13--report-builder-day-8-upgrades)
 - [Day 1 — Format Investigation & Known Limitation](#day-1--format-investigation--known-limitation)
 - [Bug Log](#bug-log)
 - [Glossary](#glossary)
@@ -1029,7 +1030,105 @@ LLMs give more weight to instructions at the **end** of a prompt. Placing the ur
 
 ---
 
-## Day 1 — Format Investigation & Known Limitation
+## Task 13 — Report Builder: Day 8 Upgrades
+
+### What was built
+
+| File | Role |
+|---|---|
+| `src/reportBuilder.js` | Three exports: `buildReport()`, `saveReport()`, `buildReportText()` — turns agent scratchpad into a structured JSON report and a readable terminal printout |
+| `index.js` | New `report` CLI command — reads the most recent saved JSON and prints it via `buildReportText()` |
+
+### Step-by-step
+
+**Step 1 — `buildReport(question, answer, scratchpad)`**
+
+Receives the answer string and the return value of `memory.getScratchpad()`. Derives sources by filtering `web_search` observations and parsing their JSON string result. Derives toolsUsed by mapping `obs.tool` over all observations. Returns a flat report object with consistent plural key names (`sources`, `toolsUsed`, `stepsUsed`).
+
+**Step 2 — `saveReport(report)`**
+
+Creates `reports/` directory at the project root with `{ recursive: true }` (safe to call repeatedly). Generates filename `report-YYYYMMDDHHMMSS.json` using `toISOString()` with all punctuation stripped. Writes JSON with 2-space indent. Returns the file path for logging.
+
+**Step 3 — `buildReportText(report)`**
+
+Formats the report as a terminal-friendly string with `===` borders, bulleted source list, and tool/step metadata footer.
+
+**Step 4 — `report` CLI command in `index.js`**
+
+Reads all `.json` files from `reports/`, sorts alphabetically and reverses (newest first, because filenames encode timestamps), reads the first, parses JSON, calls `buildReportText()`. `ENOENT` catch handles the case where no queries have been run yet.
+
+**Step 5 — `agentLoop.js` wiring (already present)**
+
+`agentLoop.js` already called `buildReport()`, `buildReportText()`, and `saveReport()` inside the `isFinalAnswer()` branch. No changes needed there.
+
+---
+
+### Mistakes & Fixes
+
+**❌ Wrong: `scratchpad.getSources()` — method doesn't exist on the scratchpad object**
+```js
+// Wrong:
+const sourceFormate = scratchpad.getSources().map(...);
+// getSources() is a standalone export from memory.js, not a method on the plain object
+// returned by getScratchpad()
+```
+**Why it was wrong:** `getScratchpad()` returns a plain object `{ question, thoughts, memoryObservation, stepsUsed }`. It has no methods. `getSources()` is a separate named export that reads the module-level scratchpad directly. Calling it as a method on the plain object throws `TypeError: scratchpad.getSources is not a function`.
+
+**✅ Fixed:** Derived sources inline from `scratchpad.memoryObservation` — filter to `web_search`, parse the JSON string result, extract `title` and `url` from each article.
+
+---
+
+**❌ Wrong: `s.result?.title` — result is a string, not an object**
+```js
+// Wrong:
+return { title: s.result?.title, url: s.result?.url }
+// s.result is a JSON string like '[{"title":"..."}]', not an object.
+// Optional chaining on a string always returns undefined.
+```
+**Why it was wrong:** In `agentLoop.js`, `result = JSON.stringify(web)` is called before passing to `memory.addObservation()`. The result is serialized. You must `JSON.parse(obs.result)` first before accessing `.title`.
+
+**✅ Fixed:** `JSON.parse(obs.result)` inside a `try/catch`, then `.map(a => ({ title: a.title, url: a.url }))`.
+
+---
+
+**❌ Wrong: `obs.toolName` — property name does not exist**
+```js
+// Wrong:
+const toolsUsed = scratchpad.memoryObservation.map(obs => obs.toolName);
+// Result: [undefined, undefined, undefined]
+```
+**Why it was wrong:** `memory.addObservation(tool, args, result)` stores `{ tool, args, result, timestamp }`. The key is `tool`, not `toolName`.
+
+**✅ Fixed:** `obs.tool`.
+
+---
+
+**❌ Wrong: Inconsistent key names between `buildReport()` and `buildReportText()`**
+```js
+// buildReport() wrote:       source, stepUsed, toolUsed  (singular, wrong)
+// buildReportText() read:    sources, stepsUsed, toolsUsed  (plural, correct)
+```
+**Why it was wrong:** Key name mismatch — `buildReportText()` would silently receive `undefined` for all three fields and crash on `.join()`.
+
+**✅ Fixed:** Renamed all three keys in `buildReport()` output to `sources`, `stepsUsed`, `toolsUsed`.
+
+---
+
+**❌ Wrong: `import` statements placed in the middle of the file**
+```js
+// reportBuilder.js — original:
+import fs from 'fs';
+// ... function definitions ...
+import { fileURLToPath } from 'url';   // ← ES Modules disallow this
+import { dirname } from 'path';         // ← must be at top level
+```
+**Why it was wrong:** ES Modules require all `import` declarations to appear at the top level of the file before any executable code. Import statements in the middle are a syntax violation and will throw at startup.
+
+**✅ Fixed:** Moved all imports to the top. Replaced `import { dirname }` with `path.dirname()` since `path` was already imported.
+
+---
+
+
 
 ### The issue
 
@@ -1197,6 +1296,11 @@ Reason: The format problem is not a code problem. It will resolve naturally in *
 | 36 | `contextBuilder.js` | `MAX_STEPS = 3` locally vs `MAX_STEPS = 7` in agentLoop — urgency fired at wrong step | High | ✅ Fixed — mirrored to `7`, added `URGENCY_THRESHOLD = MAX_STEPS - 2` |
 | 37 | `contextBuilder.js` | Reviewer comment `❌ MISSING:` pasted verbatim into system prompt template literal | Medium | ✅ Fixed — replaced with actual rule text |
 | 38 | `contextBuilder.js` | `urgencyNotice` positioned before `brief` — model urgency-warned before reading its own findings | Low | ✅ Fixed — swapped order: `base + brief + urgencyNotice` |
+| 39 | `reportBuilder.js` | `scratchpad.getSources()` — not a method on plain object; `getSources` is a standalone export | High | ✅ Fixed — derived sources inline from `scratchpad.memoryObservation` |
+| 40 | `reportBuilder.js` | `s.result?.title` — `result` is a JSON string, not an object; optional chaining returns `undefined` | High | ✅ Fixed — `JSON.parse(obs.result)` inside `try/catch` |
+| 41 | `reportBuilder.js` | `obs.toolName` — property does not exist; should be `obs.tool` | Medium | ✅ Fixed — changed to `obs.tool` |
+| 42 | `reportBuilder.js` | `source/stepUsed/toolUsed` — inconsistent singular key names; `buildReportText` reads plural names | High | ✅ Fixed — renamed to `sources/stepsUsed/toolsUsed` |
+| 43 | `reportBuilder.js` | `import` statements placed mid-file; duplicate `import { dirname } from 'path'` | Medium | ✅ Fixed — all imports moved to top; `path.dirname()` used instead of named import |
 
 ---
 

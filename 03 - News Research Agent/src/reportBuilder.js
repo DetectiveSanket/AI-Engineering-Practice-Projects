@@ -1,7 +1,10 @@
 
 import fs from 'fs';
 import path from 'path';
-import * as memory from './memory.js';
+import { fileURLToPath } from 'url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename); // src/ — used by saveReport() to locate ../reports/
 
 
 const answerFormate = {
@@ -17,29 +20,35 @@ const answerFormate = {
 
 export function buildReport(question, answer, scratchpad) {
 
-    const sourceFormate = scratchpad.getSources().map(s => {
-        return {
-            title:s.title,
-            url:s.url
-        }
-    })
+    // Sources — only web_search observations contain article data.
+    // result is stored as a JSON *string* (JSON.stringify was called in agentLoop).
+    // We parse it back to an array of articles and extract title + url from each.
+    const sources = scratchpad.memoryObservation
+        .filter(obs => obs.tool === 'web_search')
+        .flatMap(obs => {
+            try {
+                const articles = JSON.parse(obs.result);
+                return articles.map(a => ({ title: a.title, url: a.url }));
+            } catch {
+                return []; // skip if result can't be parsed
+            }
+        })
+        .filter(s => s.title && s.url); // drop any entries missing both fields
+
+    // toolsUsed — the property in each observation is 'tool', not 'toolName'
+    const toolsUsed = scratchpad.memoryObservation.map(obs => obs.tool);
 
     const report = {
-        question:question,
-        answer: answer,
-        source:sourceFormate,
-        stepUsed:scratchpad.step,
-        toolUsed:scratchpad.toolsUsed,
+        question:    question,
+        answer:      answer,
+        sources:     sources,       // plural — matches buildReportText()
+        stepsUsed:   scratchpad.stepsUsed,  // matches buildReportText()
+        toolsUsed:   toolsUsed,     // plural — matches buildReportText()
         generatedAt: new Date().toISOString(),
-    }
+    };
     return report;
 }
 
-// Save report
-import { fileURLToPath } from 'url';
-import { dirname } from 'path';
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename); // src/
 
 export async function saveReport(report) {
     // Ensure reports/ directory exists
