@@ -107,6 +107,3 @@ rl.on("close", () => {
     process.exit(0);
 });
 
-
-// Day 8 complete ✅ — Report builder fully wired.
-// Type 'report' at the CLI to print the last saved research report.

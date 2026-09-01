@@ -20,6 +20,7 @@
 - [Task 11 — Working Memory & Agent Robustness: Day 6 Upgrades](#task-11--working-memory--agent-robustness-day-6-upgrades)
 - [Task 12 — Context Engineering: Day 7 Upgrades](#task-12--context-engineering-day-7-upgrades)
 - [Task 13 — Report Builder: Day 8 Upgrades](#task-13--report-builder-day-8-upgrades)
+- [Task 14 — Error Handling + Agent Guardrails: Day 9](#task-14--error-handling--agent-guardrails-day-9)
 - [Day 1 — Format Investigation & Known Limitation](#day-1--format-investigation--known-limitation)
 - [Bug Log](#bug-log)
 - [Glossary](#glossary)
@@ -1128,6 +1129,126 @@ import { dirname } from 'path';         // ← must be at top level
 
 ---
 
+## Task 14 — Error Handling + Agent Guardrails: Day 9
+
+### What was fixed
+
+**Fix 1 — FORMAT VIOLATION guardrail (already present from Day 5)**
+
+Verified and confirmed: when `parseAction(response)` returns an error object, the loop injects a `'system'` observation with a FORMAT VIOLATION message and calls `continue` to skip to the next iteration. The agent corrects itself on the next step without crashing or aborting.
+
+---
+
+**Fix 2 — Empty search results → redirect agent to try a different query**
+
+```js
+case 'web_search':
+    const web = await webSearch(cleanArgs);
+    if (web.length === 0 || (web.length === 1 && web[0].title?.toLowerCase().includes('search unavailable'))) {
+        result = "No results found. Try a different or broader search query.";
+    } else {
+        result = JSON.stringify(web, null, 2);
+    }
+    break;
+```
+
+Checks two conditions: truly empty array (`length === 0`) and the mock fallback article from `webSearch`'s catch block (title contains `'search unavailable'`). Without this, the agent would silently receive `[]` or the fallback article and tend to repeat the same failed query.
+
+---
+
+**Fix 3 — Rate limit (429) → graceful partial answer**
+
+```js
+let response;
+try {
+    response = await generateContent({ ... });
+} catch (err) {
+    if (err.message.includes('429') || err.message.toLowerCase().includes('rate limit')) {
+        const partial = memory.getScratchpad().thoughts.at(-1)?.thought ?? "No partial answer available.";
+        return `⚠️ Rate limit reached. Partial answer:\n${partial}`;
+    }
+    throw err;
+}
+```
+
+Wraps only the Gemini API call (not the whole loop body) so rate limits are caught at the correct granularity. Unknown errors are re-thrown so they still surface.
+
+---
+
+**Fix 4 — Max steps reached → best-effort answer from scratchpad**
+
+```js
+const sp = memory.getScratchpad();
+const lastThought = sp.thoughts.at(-1)?.thought ?? "No reasoning captured.";
+const obsCount = sp.memoryObservation.length;
+return `⚠️ Reached max steps (${MAX_STEPS}). Best effort answer based on ${obsCount} observations:\n\n${lastThought}`;
+```
+
+Replaces the generic `"Error: couldn't find an answer"` string. The agent's last `Thought:` typically contains near-complete synthesis. Including observation count tells the user how much research was done.
+
+---
+
+**Fix 5 — Network timeout → retry once in `webSearch.js`**
+
+```js
+async function withRetry(fn, retries = 1) {
+    try {
+        return await fn();
+    } catch (err) {
+        if (retries > 0) {
+            console.log(`⚠️ Network error, retrying once... (${err.message})`);
+            return await withRetry(fn, retries - 1);
+        }
+        throw err;
+    }
+}
+```
+
+Defined as a standalone module-level helper before `webSearch()`. The newsapi call is wrapped: `await withRetry(() => newsapi.v2.everything({ ... }))`. After 1 retry exhaustion, the error propagates to `webSearch`'s existing `catch` block which returns the graceful fallback array.
+
+---
+
+### Mistakes & Fixes
+
+**❌ Wrong: `withRetry` nested inside `webSearch` body, wrapping `webSearch` itself**
+
+```js
+// Wrong structure (what the user wrote):
+async function withRetry(fn, retries = 1) {
+    try {
+        async function webSearch(query) {   // ← webSearch declared INSIDE withRetry
+            ...
+        };  // ← never executed
+    } catch (err) { ... }
+}
+const response = await withRetry(() => newsapi.v2.everything({ q: query, language: 'en' }));
+// ← module-level call references `query` which doesn't exist here — ReferenceError
+```
+
+Three structural problems:
+1. `webSearch` was declared inside `withRetry`'s `try` block — it never executed, it's just a function declaration
+2. The `export` keyword was lost — nothing could import `webSearch`
+3. A stray `const response = await withRetry(...)` at module top-level referenced `query` (a parameter that only exists inside a function scope) — throws `ReferenceError: query is not defined` at module load time
+
+**✅ Fixed:** `withRetry` is a standalone helper defined before `webSearch`. `webSearch` is exported normally and calls `withRetry` internally on the newsapi call.
+
+---
+
+**❌ Wrong: `.toLowerCase() === 'Search unavailable'` — case mismatch, always false**
+
+```js
+// Wrong:
+web[0].title.toLowerCase() === 'Search unavailable'  // 'Search unavailable' has capital S
+// .toLowerCase() returns all-lowercase, so this NEVER equals the capitalized string
+
+// Fixed:
+web[0].title?.toLowerCase().includes('search unavailable')  // all-lowercase target
+```
+
+Additionally added `?.` optional chaining because NewsAPI occasionally returns `null` for article titles; calling `.toLowerCase()` on `null` throws `TypeError`.
+
+---
+
 
 
 ### The issue
@@ -1301,6 +1422,11 @@ Reason: The format problem is not a code problem. It will resolve naturally in *
 | 41 | `reportBuilder.js` | `obs.toolName` — property does not exist; should be `obs.tool` | Medium | ✅ Fixed — changed to `obs.tool` |
 | 42 | `reportBuilder.js` | `source/stepUsed/toolUsed` — inconsistent singular key names; `buildReportText` reads plural names | High | ✅ Fixed — renamed to `sources/stepsUsed/toolsUsed` |
 | 43 | `reportBuilder.js` | `import` statements placed mid-file; duplicate `import { dirname } from 'path'` | Medium | ✅ Fixed — all imports moved to top; `path.dirname()` used instead of named import |
+| 44 | `tools/webSearch.js` | `withRetry` nested inside `webSearch` body — `webSearch` never executed, `export` lost, stray module-level call with undefined `query` | Critical | ✅ Fixed — `withRetry` moved to standalone module-level helper; `webSearch` re-exported and calls `withRetry` internally |
+| 45 | `agentLoop.js` | Empty `web_search` results silently injected as `[]` — agent looped same query forever | High | ✅ Fixed — explicit "No results found" string injected as observation when array is empty or fallback article |
+| 46 | `agentLoop.js` | `.toLowerCase() === 'Search unavailable'` case mismatch — condition always false | Medium | ✅ Fixed — changed to `.toLowerCase().includes('search unavailable')` with `?.` optional chaining |
+| 47 | `agentLoop.js` | Max steps fallback returned generic error string — discarded all agent work | Medium | ✅ Fixed — returns last `Thought:` from scratchpad + observation count as best-effort answer |
+| 48 | `agentLoop.js` | 429 rate-limit error re-thrown — crashed the entire session | High | ✅ Fixed — catch block returns partial answer from last thought; non-429 errors still re-thrown |
 
 ---
 
@@ -1332,3 +1458,8 @@ Reason: The format problem is not a code problem. It will resolve naturally in *
 | **Deduplication Guard** | A hard-stop instruction telling the model it cannot repeat a search it has already performed. |
 | **Urgency Notice** | A mandatory instruction injected near the end of the step budget forcing the model to stop calling tools and write a Final Answer. |
 | **Mirrored constant** | A constant defined in two files that must stay in sync — changing one requires changing both. |
+| **Graceful degradation** | Designing a system to fail in a controlled, user-friendly way rather than crashing or hanging unexpectedly. |
+| **`withRetry(fn, retries)` pattern** | A higher-order async helper that retries a failing operation N times. Accepts a factory function `() => call()` so the operation can be re-executed on retry. |
+| **`array.at(-1)`** | Returns the last element of any array. Returns `undefined` (not a crash) on empty arrays — safer than `arr[arr.length - 1]`. |
+| **Optional chaining `?.`** | Safely traverses property accesses that may be `null` or `undefined` — returns `undefined` instead of throwing `TypeError`. |
+| **Partial answer on rate limit** | When a 429 error is caught mid-session, returning the agent's last `Thought:` as a best-effort result instead of crashing. |

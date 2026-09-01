@@ -20,6 +20,7 @@
 - [Task 11 — Working Memory & Agent Robustness: Day 6 Upgrades](#task-11--working-memory--agent-robustness-day-6-upgrades)
 - [Task 12 — Context Engineering: Day 7 Upgrades](#task-12--context-engineering-day-7-upgrades)
 - [Task 13 — Report Builder: Day 8 (`src/reportBuilder.js` + `index.js`)](#task-13--report-builder-day-8)
+- [Task 14 — Error Handling + Agent Guardrails: Day 9](#task-14--error-handling--agent-guardrails-day-9)
 - [Day 1 — Format Investigation & Known Limitation](#day-1--format-investigation--known-limitation)
 - [Master Concepts Glossary](#master-concepts-glossary)
 
@@ -1261,6 +1262,174 @@ const __dirname = path.dirname(__filename);
 
 ---
 
+## Task 14 — Error Handling + Agent Guardrails: Day 9
+
+### What changed and WHY
+
+Before Day 9, the agent was functional but brittle: any unexpected input from the LLM, an empty API response, a rate limit, or hitting the step cap would either crash the process, return a useless generic message, or silently loop without making progress. Day 9 makes the agent **production-hardened** against all five real failure modes.
+
+---
+
+### Failure Mode 1 — LLM outputs garbage (no `Action:`, no `Final Answer:`)
+
+**Where it's handled:** `src/agentLoop.js` — already present from prior days.
+
+When `parseAction(response)` returns `{ error: 'parse_failed' }` or `{ error: 'unknown_tool' }`, the loop injects a FORMAT VIOLATION observation into memory:
+
+```js
+if(error) {
+    memory.addObservation('system', '',
+        `FORMAT VIOLATION: You did not follow the required format.
+        You MUST respond using ONLY this exact structure:
+
+        Thought: [your reasoning]
+        Action: tool_name(your search query)
+
+        Available tools: web_search, summarize, check_claim
+        Do NOT answer directly. You MUST call a tool first.`
+    );
+    continue;  // ← skip tool execution, go to next iteration
+}
+```
+
+This is stored as a `'system'` observation — not a thought — so the agent treats it as an external correction, not its own reasoning. On the next iteration, Gemini reads the FORMAT VIOLATION in its context and corrects its output.
+
+**Why `continue` not `break`:** We don't want to abort the entire session for one bad response. One wasted step is acceptable; aborting wastes all prior tool calls.
+
+---
+
+### Failure Mode 2 — Tool returns empty results
+
+**Where it's handled:** `src/agentLoop.js` — inside the `web_search` switch case.
+
+```js
+case 'web_search':
+    const web = await webSearch(cleanArgs);
+
+    if (web.length === 0 || (web.length === 1 && web[0].title?.toLowerCase().includes('search unavailable'))) {
+        result = "No results found. Try a different or broader search query.";
+    } else {
+        result = JSON.stringify(web, null, 2);
+    }
+    break;
+```
+
+**Two conditions checked:**
+- `web.length === 0` — NewsAPI returned no articles at all
+- `web[0].title?.toLowerCase().includes('search unavailable')` — the catch fallback inside `webSearch.js` returned the mock "Search unavailable" article
+
+**Why `.toLowerCase().includes()` instead of `=== 'Search unavailable'`:** `.toLowerCase()` produces all-lowercase output, so comparing it to a string with a capital `S` would always be `false`. `.includes()` does a substring match on the lowercased title — safe against any case variation.
+
+**Why `?.` optional chaining:** If `title` is `null` (NewsAPI occasionally returns `null` titles), accessing `.toLowerCase()` on it would throw `TypeError`. The `?.` returns `undefined` instead, which `.includes()` handles gracefully.
+
+By injecting an explicit `"No results found. Try a different or broader search query."` string as the observation, Gemini reads it on the next step and naturally tries a different search angle instead of looping the same empty query forever.
+
+---
+
+### Failure Mode 3 — API rate limit hit (429)
+
+**Where it's handled:** `src/agentLoop.js` — wrapped around the `generateContent()` call.
+
+```js
+let response;
+try {
+    response = await generateContent({
+        prompt: { system: systemPrompt, message: contentsWithPrimer },
+        config: { temperature: 0.2, topP: 0.95 }
+    });
+} catch (err) {
+    if (err.message.includes('429') || err.message.toLowerCase().includes('rate limit')) {
+        const partial = memory.getScratchpad().thoughts.at(-1)?.thought ?? "No partial answer available.";
+        return `⚠️ Rate limit reached. Partial answer:\n${partial}`;
+    }
+    throw err; // re-throw unknown errors so they still surface
+}
+```
+
+**Why return partial answer instead of crashing:** If a rate limit hits mid-session, the agent has already done 2–4 tool calls and accumulated observations. The LLM's last `Thought:` often contains near-complete reasoning. Returning it gives the user something useful rather than a crash traceback.
+
+**Why `.at(-1)`:** Array method that returns the last element — equivalent to `arr[arr.length - 1]` but more concise and safe on empty arrays (returns `undefined` instead of throwing).
+
+**Why `throw err` for non-rate-limit errors:** Unknown errors (network failure, SDK bug, etc.) should still propagate up so they're visible in the terminal. Silently swallowing all errors would make debugging impossible.
+
+---
+
+### Failure Mode 4 — Max steps reached
+
+**Where it's handled:** `src/agentLoop.js` — the fallback `return` after the `while` loop.
+
+```js
+// Before (Day 8):
+return `Error: I couldn't find an answer within ${MAX_STEPS} steps. Try rephrasing your question.`;
+
+// After (Day 9):
+const sp = memory.getScratchpad();
+const lastThought = sp.thoughts.at(-1)?.thought ?? "No reasoning captured.";
+const obsCount = sp.memoryObservation.length;
+return `⚠️ Reached max steps (${MAX_STEPS}). Best effort answer based on ${obsCount} observations:\n\n${lastThought}`;
+```
+
+**Why the last thought is useful:** The agent's final `Thought:` before hitting the step cap usually contains near-complete synthesis like *"I now have enough information about X and Y"*. This is far more useful than a generic error string.
+
+**Why include `obsCount`:** Gives the user context about how much research was completed. 0 observations = agent never ran; 4 observations = the agent did real work, just ran out of budget.
+
+---
+
+### Failure Mode 5 — Network timeout
+
+**Where it's handled:** `tools/webSearch.js` — a `withRetry` helper wraps the NewsAPI call.
+
+```js
+// Helper defined BEFORE webSearch() — standalone, not nested
+async function withRetry(fn, retries = 1) {
+    try {
+        return await fn();
+    } catch (err) {
+        if (retries > 0) {
+            console.log(`⚠️ Network error, retrying once... (${err.message})`);
+            return await withRetry(fn, retries - 1);
+        }
+        throw err; // after 1 retry, propagate to webSearch()'s own catch block
+    }
+}
+
+export async function webSearch(query) {
+    try {
+        const respose = await withRetry(() => newsapi.v2.everything({
+            q: query,
+            language: 'en',
+        }));
+        // ... rest of function
+    } catch (error) {
+        // catches both immediate errors AND errors after retry exhaustion
+        return [{ title: "Search unavailable", ... }];
+    }
+}
+```
+
+**Why `withRetry` is a standalone helper, not nested inside `webSearch`:** A function declared inside another function's body is recreated on every call. A standalone function at module level is created once. More importantly, nesting `withRetry` inside `webSearch` means it cannot be tested or reused — it becomes tightly coupled to one specific tool.
+
+**Why `retries = 1` (only one retry):** On a transient network blip, one retry is usually sufficient. More retries increase latency noticeably. After 1 retry failure, the `throw err` propagates up to `webSearch`'s own `catch` block, which returns the graceful "Search unavailable" fallback.
+
+**Why pass `fn` as a function, not the result:** `withRetry(() => newsapi.v2.everything(...))` passes a *factory function* — not the already-started Promise. This allows `withRetry` to call `fn()` again on retry. Passing the Promise directly would retry the already-resolved/rejected Promise, which always produces the same result.
+
+---
+
+### Key concepts introduced in Task 14
+
+| Concept | Plain English |
+|---|---|
+| **`array.at(-1)`** | Returns the last element of an array. Returns `undefined` (not a crash) on empty arrays. |
+| **`?.` optional chaining** | Safely accesses a property on a potentially `null`/`undefined` value — short-circuits to `undefined` instead of throwing |
+| **`withRetry(fn, retries)` pattern** | A higher-order function that retries an async operation N times before giving up — keeps retry logic DRY and reusable |
+| **Passing a factory `() => call()`** | Passing a function that *produces* the Promise, not the Promise itself — allows the caller to re-execute the operation on retry |
+| **Partial answer on rate limit** | Returning the agent's last reasoning as a best-effort result instead of crashing — gives the user something useful |
+| **`throw err` for unknown errors** | Re-throwing non-rate-limit errors so they still surface in the terminal — avoids silently hiding bugs |
+| **Graceful degradation** | Designing systems to fail in a controlled, user-friendly way rather than crashing or hanging |
+| **`.toLowerCase().includes()`** | The correct way to do case-insensitive substring matching — `.toLowerCase()` first, then `.includes()` with all-lowercase target |
+
+---
+
 
 
 ### What was expected vs. what happened
@@ -1423,3 +1592,8 @@ The format issue is **not a code bug** — it is a model behavior characteristic
 | **State bleed** | When context or data from a previous agent execution carries over to the next session, leading to unexpected errors or incorrect context. Prevented by calling `clear()` on session startup. |
 | **Dynamic date injection** | Dynamically appending today's actual calendar date to system instructions so the model can correctly reason about time-sensitive searches instead of dismissing future dates as hallucinations. |
 | **Token budget management** | Strategically truncating or trimming large payloads (e.g. slicing tool results or removing older thoughts/observations) to prevent model context window overflow or high costs. |
+| **Graceful degradation** | Designing a system to fail in a controlled, user-friendly way rather than crashing or hanging unexpectedly. |
+| **`withRetry(fn, retries)` pattern** | A higher-order async helper that retries a failing operation N times before giving up. The key is passing a factory `() => call()` not the Promise itself. |
+| **`array.at(-1)`** | Returns the last element of any array. Returns `undefined` (not a crash) on empty arrays — safer than `arr[arr.length - 1]` when the array may be empty. |
+| **Optional chaining `?.`** | Safely traverses a chain of property accesses that may be `null` or `undefined` — returns `undefined` instead of throwing `TypeError`. |
+| **Partial answer on rate limit** | When a 429 error is caught mid-session, returning the agent's last `Thought:` as a best-effort result rather than crashing — preserves the work done so far. |

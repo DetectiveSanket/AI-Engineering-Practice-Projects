@@ -51,16 +51,26 @@ export async function runAgent(question ) {
 
 
         // Then pass contentsWithPrimer instead of messages:
-        const response = await generateContent({
-            prompt: {
-                system: systemPrompt,
-                message: contentsWithPrimer
-            },
-            config: {
-                temperature: 0.2,
-                topP: 0.95
+        let response;
+        try {
+            response = await generateContent({
+                prompt: {
+                    system: systemPrompt,
+                    message: contentsWithPrimer
+                },
+                config: {
+                    temperature: 0.2,
+                    topP: 0.95
+                }
+            })
+        } catch (err) {
+            if (err.message.includes('429') || err.message.toLowerCase().includes('rate limit')) {
+                const partial = memory.getScratchpad().thoughts.at(-1)?.thought ?? "No partial answer available.";
+                return `⚠️ Rate limit reached. Partial answer:\n${partial}`;
             }
-        })
+            throw err; // re-throw unknown errors
+        }
+
 
         // ─── DEBUG: full model response ─────────────────────────────────────
         // console.log('🤖 GEMINI RAW RESPONSE:');
@@ -121,7 +131,13 @@ export async function runAgent(question ) {
             case 'web_search':
                 console.log("Tool is web_search");
                 const web = await webSearch(cleanArgs);
-                result = JSON.stringify(web);
+
+                if (web.length === 0 || (web.length === 1 && web[0].title?.toLowerCase().includes('search unavailable'))) {
+                    result = "No results found. Try a different or broader search query.";
+                }else{
+                    result = JSON.stringify(web, null, 2);
+                }
+                
                 console.log("Observation:", result.slice(0, 200) + '...');
                 break;
 
@@ -182,5 +198,9 @@ export async function runAgent(question ) {
         
     }
 
-    return `Error: I couldn't find an answer within ${MAX_STEPS} steps. Try rephrasing your question.`;
+    const sp = memory.getScratchpad();
+    const lastThought = sp.thoughts.at(-1)?.thought ?? "No reasoning captured.";
+    const obsCount = sp.memoryObservation.length;
+    return `⚠️ Reached max steps (${MAX_STEPS}). Best effort answer based on ${obsCount} observations:\n\n${lastThought}`;
+
 };

@@ -16,6 +16,21 @@ config({ path: join(__dirname, "..", ".env") });
 
 const newsapi = new NewsAPI(process.env.NEWS_API_KEY);
 
+// ── Retry helper ──────────────────────────────────────────────────────────────
+// Wraps any async function and retries it once on failure.
+// Usage: withRetry(() => someAsyncCall())
+async function withRetry(fn, retries = 1) {
+    try {
+        return await fn();
+    } catch (err) {
+        if (retries > 0) {
+            console.log(`⚠️ Network error, retrying once... (${err.message})`);
+            return await withRetry(fn, retries - 1);
+        }
+        throw err; // after 1 retry, give up and propagate
+    }
+}
+
 export async function webSearch(query) {
 
     console.log('------- webSearch tool is called ------');
@@ -23,22 +38,14 @@ export async function webSearch(query) {
     
     try {
         
-        const respose = await newsapi.v2.everything({
-        // const respose = await newsapi.v2.topHeadlines({
+        const respose = await withRetry(() => newsapi.v2.everything({
             q: query,
             language: 'en',
-            // category: 'technology',
-            // country: 'in'
-            // sortBy: 'relevancy',
-            // page: 2
-        })
+        }));
 
         if(respose.status !== 'ok' || !respose.articles) {
             return 'No articles found for this query.'
         }
-
-        // console.log('respose' , respose);
-        
 
         const articles = respose.articles;
 
@@ -66,16 +73,16 @@ export async function webSearch(query) {
         return top3;
         
     } catch (error) {
-    console.log(`webSearch error: ${error.message}`);
-    return [
-        {
-            title: "Search unavailable",
-            description: "Could not retrieve live results. Please try again.",
-            url: "",
-            publishedAt: new Date().toISOString()
-        }
-    ];
-}
+        console.log(`webSearch error: ${error.message}`);
+        return [
+            {
+                title: "Search unavailable",
+                description: "Could not retrieve live results. Please try again.",
+                url: "",
+                publishedAt: new Date().toISOString()
+            }
+        ];
+    }
 
 };
 
