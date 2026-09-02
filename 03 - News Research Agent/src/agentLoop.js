@@ -137,6 +137,12 @@ export async function runAgent(question ) {
                 }else{
                     result = JSON.stringify(web, null, 2);
                 }
+
+                // If very long web search, auto-summarize (saves token budget + context space)
+                if (result.length > 2000) {
+                    console.log(`⚠️ Observation too long — auto-summarizing...`);
+                    result = await summarize(result);
+                }
                 
                 console.log("Observation:", result.slice(0, 200) + '...');
                 break;
