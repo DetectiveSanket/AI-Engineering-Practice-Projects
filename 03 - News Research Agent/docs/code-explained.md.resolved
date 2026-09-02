@@ -21,6 +21,7 @@
 - [Task 12 — Context Engineering: Day 7 Upgrades](#task-12--context-engineering-day-7-upgrades)
 - [Task 13 — Report Builder: Day 8 Upgrades](#task-13--report-builder-day-8-upgrades)
 - [Task 14 — Error Handling + Agent Guardrails: Day 9](#task-14--error-handling--agent-guardrails-day-9)
+- [Task 15 — CLI Polish + Multi-Question Session: Day 10](#task-15--cli-polish--multi-question-session-day-10)
 - [Day 1 — Format Investigation & Known Limitation](#day-1--format-investigation--known-limitation)
 - [Bug Log](#bug-log)
 - [Glossary](#glossary)
@@ -1249,6 +1250,99 @@ Additionally added `?.` optional chaining because NewsAPI occasionally returns `
 
 ---
 
+## Task 15 — CLI Polish + Multi-Question Session: Day 10
+
+### What was built
+
+| Feature | Implementation |
+|---|---|
+| Session history array | `const sessionHistory = []` declared inside `run()` before `while(true)` |
+| Store each result | `sessionHistory.push({ question, answer, timestamp })` inside `try`, after `runAgent()` |
+| `history` command | Prints numbered list of past questions with 120-char answer preview and local timestamp |
+| `clear` command | Calls `memory.clear()` and prints confirmation |
+| `saveSessionLog(history)` | Module-level async function — creates `sessions/` dir, writes `session-YYYYMMDDHHMMSS.json` |
+| `exit` wired to save | `await saveSessionLog(sessionHistory)` called before `rl.close()` |
+| `logDir` constant | `const logDir = path.join(__dirname, 'sessions')` at module level |
+
+---
+
+### Step-by-step
+
+**Step 1 — `sessionHistory` array**
+Declared inside `run()` but *outside* `while(true)`. This is the only correct placement: inside the loop = resets every iteration; inside `run()` outside loop = persists for the whole session.
+
+**Step 2 — Push after `runAgent()`**
+Placed inside `try` after `runAgent()` returns. If `runAgent()` throws, execution jumps to `catch` and the push is skipped — failed queries are never recorded as successful.
+
+**Step 3 — `history` command**
+Uses `sessionHistory.length` (property, not method) to check emptiness. `forEach((item, idx))` iterates with a 0-based index; adding 1 gives 1-based display. `.substring(0, 120)` caps the answer preview. `new Date(item.timestamp).toLocaleString()` converts UTC ISO to local human-readable time.
+
+**Step 4 — `clear` command**
+Calls `memory.clear()` directly — already in scope via `import * as memory`. Prints confirmation. The auto-clear in `agentLoop.js` handles inter-question cleanup; this command is for mid-session manual resets.
+
+**Step 5 — `saveSessionLog()` + `exit` wiring**
+The function uses `fs.existsSync` + `fs.mkdirSync` for synchronous dir creation. Filename is built with `.replace(/[-:T.]/g, '').slice(0, 14)` to produce a Windows-safe `YYYYMMDDHHMMSS` string. `history[0]?.timestamp ?? timestamp` handles the edge case of `exit` typed before any question. The `exit` handler calls `await saveSessionLog(sessionHistory)` to guarantee the file write completes before process exit.
+
+---
+
+### Mistakes & Fixes
+
+**❌ Wrong: `sessionHistory.length()` — called as a function**
+```js
+// Wrong:
+if (sessionHistory.length() === 0)
+// TypeError: sessionHistory.length is not a function
+
+// Fixed:
+if (sessionHistory.length === 0)
+```
+`length` is a read-only numeric property on all arrays and strings, not a method. Adding `()` tries to call the number `0` or `5` as a function, which throws `TypeError`.
+
+---
+
+**❌ Wrong: `logDir` referenced but never declared — ReferenceError at runtime**
+```js
+// Wrong: saveSessionLog used logDir but it was never defined anywhere
+if(!fs.existsSync(logDir)) { ... }  // ReferenceError: logDir is not defined
+
+// Fixed: module-level constant (same as __dirname, near top of file)
+const logDir = path.join(__dirname, 'sessions');
+```
+
+---
+
+**❌ Wrong: Raw ISO timestamp used in filename — colons illegal on Windows**
+```js
+// Wrong:
+const filename = `session-${new Date().toISOString()}.json`;
+// → session-2026-09-02T11:10:00.000Z.json
+// Colons in filenames are illegal on Windows — fs.writeFileSync throws EINVAL
+
+// Fixed:
+const fileTimestamp = now.toISOString().replace(/[-:T.]/g, '').slice(0, 14);
+const filename = `session-${fileTimestamp}.json`;
+// → session-20260902111000.json ✅
+```
+Same pattern used in `reportBuilder.js`.
+
+---
+
+**❌ Wrong: Empty `catch {}` block silently swallowed all errors**
+```js
+// Wrong:
+} catch (error) {
+    // nothing
+}
+// If the write failed (permissions, disk full, invalid path) — no output, no file, no clue
+
+// Fixed:
+} catch (error) {
+    console.log('❌ Could not save session log:', error.message);
+}
+```
+
+---
+
 
 
 ### The issue
@@ -1427,6 +1521,11 @@ Reason: The format problem is not a code problem. It will resolve naturally in *
 | 46 | `agentLoop.js` | `.toLowerCase() === 'Search unavailable'` case mismatch — condition always false | Medium | ✅ Fixed — changed to `.toLowerCase().includes('search unavailable')` with `?.` optional chaining |
 | 47 | `agentLoop.js` | Max steps fallback returned generic error string — discarded all agent work | Medium | ✅ Fixed — returns last `Thought:` from scratchpad + observation count as best-effort answer |
 | 48 | `agentLoop.js` | 429 rate-limit error re-thrown — crashed the entire session | High | ✅ Fixed — catch block returns partial answer from last thought; non-429 errors still re-thrown |
+| 49 | `index.js` | `sessionHistory.length()` — called as function; arrays don't have `length()` method | High | ✅ Fixed — changed to `sessionHistory.length` (property, no parentheses) |
+| 50 | `index.js` | `logDir` used in `saveSessionLog()` but never declared — ReferenceError at runtime | Critical | ✅ Fixed — declared as module-level constant `const logDir = path.join(__dirname, 'sessions')` |
+| 51 | `index.js` | Raw ISO timestamp used as filename — colons in `T11:10:00.000Z` are illegal on Windows | High | ✅ Fixed — stripped with `.replace(/[-:T.]/g, '').slice(0, 14)` → `YYYYMMDDHHMMSS` |
+| 52 | `index.js` | `totalQuestion` (singular) — inconsistent key name, should be `totalQuestions` | Low | ✅ Fixed — renamed to `totalQuestions` |
+| 53 | `index.js` | Empty `catch {}` in `saveSessionLog` silently hid all write errors | Medium | ✅ Fixed — `console.log('❌ Could not save session log:', error.message)` |
 
 ---
 
@@ -1463,3 +1562,7 @@ Reason: The format problem is not a code problem. It will resolve naturally in *
 | **`array.at(-1)`** | Returns the last element of any array. Returns `undefined` (not a crash) on empty arrays — safer than `arr[arr.length - 1]`. |
 | **Optional chaining `?.`** | Safely traverses property accesses that may be `null` or `undefined` — returns `undefined` instead of throwing `TypeError`. |
 | **Partial answer on rate limit** | When a 429 error is caught mid-session, returning the agent's last `Thought:` as a best-effort result instead of crashing. |
+| **Session-scoped array** | Declared outside a loop but inside a function — persists for the whole session, resets on program restart. |
+| **`array.length` property** | `length` is a numeric property, NOT a method. `arr.length` ✅, `arr.length()` ❌ throws TypeError. |
+| **Filename-safe timestamp** | ISO strings contain colons — illegal in Windows filenames. Use `.replace(/[-:T.]/g, '').slice(0, 14)` to produce `YYYYMMDDHHMMSS`. |
+| **Empty `catch` anti-pattern** | A `catch {}` with no body silently hides errors. Always log at minimum so failures are visible and debuggable. |

@@ -21,6 +21,7 @@
 - [Task 12 — Context Engineering: Day 7 Upgrades](#task-12--context-engineering-day-7-upgrades)
 - [Task 13 — Report Builder: Day 8 (`src/reportBuilder.js` + `index.js`)](#task-13--report-builder-day-8)
 - [Task 14 — Error Handling + Agent Guardrails: Day 9](#task-14--error-handling--agent-guardrails-day-9)
+- [Task 15 — CLI Polish + Multi-Question Session: Day 10 (`index.js`)](#task-15--cli-polish--multi-question-session-day-10)
 - [Day 1 — Format Investigation & Known Limitation](#day-1--format-investigation--known-limitation)
 - [Master Concepts Glossary](#master-concepts-glossary)
 
@@ -1430,6 +1431,186 @@ export async function webSearch(query) {
 
 ---
 
+## Task 15 — CLI Polish + Multi-Question Session: Day 10
+
+### What this task does and WHY it exists
+
+Before Day 10, the CLI was a raw loop: every input that wasn't `exit`, `scratchpad`, or `report` was treated as a research question. There was no way to review what you'd asked earlier, no way to cleanly reset state mid-session, and nothing was saved about the overall session. Day 10 adds **session awareness** — the CLI becomes a proper multi-question research terminal.
+
+All changes live in `index.js` only. No agent, tool, or memory logic changes.
+
+---
+
+### Feature 1 — `sessionHistory` array
+
+```js
+async function run() {
+    console.log("🚀 AI Study Buddy is waking up...");
+
+    const sessionHistory = [];  // ← declared before the loop, lives for the whole session
+    
+    while(true) { ... }
+}
+```
+
+- Declared **inside `run()`** but **outside `while(true)`** — this is the key placement.
+- Inside the loop = reset on every iteration (wrong). Inside `run()` but outside the loop = persists for the whole session.
+- Each entry shape: `{ question, answer, timestamp }` — just enough to reconstruct what happened.
+
+---
+
+### Feature 2 — Push to history after each successful query
+
+```js
+const agentResponse = await runAgent(userInput);
+
+sessionHistory.push({
+    question: userInput,
+    answer: agentResponse,
+    timestamp: new Date().toISOString()
+});
+```
+
+- Placed **inside the `try` block**, after `runAgent()` — only stores successful queries.
+- If `runAgent()` throws, the `catch` block runs instead and the push is skipped — failed queries are never logged as successful.
+- `new Date().toISOString()` — UTC timestamp in `"2026-09-02T05:45:00.000Z"` format. Consistent across timezones.
+
+---
+
+### Feature 3 — `history` command
+
+```js
+if (userInput.toLowerCase() === 'history') {
+    if (sessionHistory.length === 0) {
+        console.log('\n 📭 No history yet. Ask a research question first.');
+    } else {
+        console.log('\n📚 Past Questions:');
+        sessionHistory.forEach((item, idx) => {
+            console.log(`  ${idx + 1}. ${item.question}`);
+            console.log(`     → ${item.answer.substring(0, 120)}...`);
+            console.log(`     (${new Date(item.timestamp).toLocaleString()})`);
+        });
+    }
+    continue;
+}
+```
+
+- **`sessionHistory.length`** — a property, not a method. Arrays don't have `length()` — that would throw `TypeError: sessionHistory.length is not a function`.
+- **`forEach((item, idx))`** — the second argument to `forEach`'s callback is the index (0-based). Adding 1 gives the user a 1-based numbered list.
+- **`.substring(0, 120)`** — caps the answer preview at 120 chars so the history output stays readable. Full answers are available via the `report` command.
+- **`new Date(item.timestamp).toLocaleString()`** — converts the stored UTC ISO string back to a human-friendly local time string.
+
+---
+
+### Feature 4 — `clear` command
+
+```js
+if (userInput.toLowerCase() === 'clear') {
+    memory.clear();
+    console.log('\n🧹 Cleared scratchpad for a fresh research session.');
+    continue;
+}
+```
+
+- Calls `memory.clear()` — already imported at the top of `index.js` (`import * as memory from './src/memory.js'`).
+- **Why this exists even though `agentLoop.js` calls `memory.clear()` automatically:** The auto-clear in `agentLoop.js` resets memory at the *start* of each new question. The `clear` command lets the user manually wipe memory *mid-session* — e.g. if they interrupted a query and want a clean slate before the next one.
+
+---
+
+### Feature 5 — `saveSessionLog()` + wired into `exit`
+
+#### Module-level path constant
+
+```js
+const logDir = path.join(__dirname, 'sessions');
+```
+
+Declared at module level (alongside `__dirname`) so it's available to `saveSessionLog()` without being passed as an argument. The same pattern as `reportsDir` in the `report` command.
+
+#### The function
+
+```js
+async function saveSessionLog(history) {
+    try {
+        if (!fs.existsSync(logDir)) {
+            fs.mkdirSync(logDir, { recursive: true });
+        }
+
+        const now = new Date();
+        const timestamp = now.toISOString();
+        // Strip colons/dashes so filename is valid on Windows
+        const fileTimestamp = now.toISOString().replace(/[-:T.]/g, '').slice(0, 14); // → YYYYMMDDHHMMSS
+        const filename = `session-${fileTimestamp}.json`;
+        const logFile = path.join(logDir, filename);
+
+        const logData = {
+            sessionStart: history[0]?.timestamp ?? timestamp,
+            sessionEnd: timestamp,
+            totalQuestions: history.length,
+            questions: [...history],
+        };
+
+        fs.writeFileSync(logFile, JSON.stringify(logData, null, 2));
+        console.log(`\n📝 Session saved to sessions/${filename}`);
+    } catch (error) {
+        console.log('❌ Could not save session log:', error.message);
+    }
+}
+```
+
+**Key design decisions:**
+
+- **`fs.existsSync` + `fs.mkdirSync`** — synchronous check-then-create. Safe here because this runs once at exit, not in a hot loop.
+- **Filename uses stripped timestamp** (`YYYYMMDDHHMMSS`) not raw ISO string — colons (`:`) are illegal in Windows filenames. Raw ISO `"2026-09-02T11:10:00.000Z"` would crash `writeFileSync` on Windows.
+- **`history[0]?.timestamp ?? timestamp`** — `?.` protects against an empty history array (user typed `exit` immediately without asking anything). `??` falls back to the session-end timestamp.
+- **`[...history]`** — shallow copy of the array. Not strictly necessary here (JSON.stringify doesn't mutate), but a good defensive habit.
+- **`catch` block logs the error** — the silent empty `catch` in the original implementation would have hidden any write failures completely.
+
+#### Wired into exit
+
+```js
+if (userInput.toLowerCase() === 'exit') {
+    console.log('\n👋 Closing the AI Study Buddy. See you later!');
+    await saveSessionLog(sessionHistory);  // ← await is required
+    rl.close();
+    break;
+}
+```
+
+- **`await` is mandatory** — `saveSessionLog` is `async` (uses `fs.promises` indirectly via `writeFileSync` in this sync version, but the pattern requires it). Without `await`, the function call returns a Promise immediately and the process may exit before the file write completes.
+
+#### The saved JSON shape
+
+```json
+{
+  "sessionStart": "2026-09-02T05:22:00.000Z",
+  "sessionEnd": "2026-09-02T05:35:00.000Z",
+  "totalQuestions": 3,
+  "questions": [
+    { "question": "What is GPT-5?",       "answer": "...", "timestamp": "2026-09-02T05:23:00.000Z" },
+    { "question": "AI regulation news?",  "answer": "...", "timestamp": "2026-09-02T05:28:00.000Z" },
+    { "question": "SpaceX latest launch?","answer": "...", "timestamp": "2026-09-02T05:34:00.000Z" }
+  ]
+}
+```
+
+---
+
+### Key concepts introduced in Task 15
+
+| Concept | Plain English |
+|---|---|
+| **Session-scoped array** | A variable declared outside a loop but inside a function — persists for the entire function call, resets when the function exits |
+| **`array.length` (property)** | `length` is a property on arrays, not a method — `arr.length` ✅, `arr.length()` ❌ throws TypeError |
+| **`forEach((item, idx))`** | The second callback argument is the element's 0-based index — add 1 for 1-based display |
+| **`.substring(0, N)`** | Extracts the first N characters of a string — used here to cap preview output |
+| **`toLocaleString()`** | Converts a Date to a human-readable string in the user's local timezone |
+| **Filename-safe timestamp** | Raw ISO strings contain colons (`:`) which are illegal in Windows filenames. Strip with `.replace(/[-:T.]/g, '').slice(0, 14)` |
+| **Module-level path constant** | A `path.join(__dirname, ...)` constant at module level — available everywhere without being passed as an argument |
+| **Empty `catch` anti-pattern** | An empty `catch {}` silently swallows all errors — always log at minimum so failures are visible |
+
+---
+
 
 
 ### What was expected vs. what happened
@@ -1597,3 +1778,7 @@ The format issue is **not a code bug** — it is a model behavior characteristic
 | **`array.at(-1)`** | Returns the last element of any array. Returns `undefined` (not a crash) on empty arrays — safer than `arr[arr.length - 1]` when the array may be empty. |
 | **Optional chaining `?.`** | Safely traverses a chain of property accesses that may be `null` or `undefined` — returns `undefined` instead of throwing `TypeError`. |
 | **Partial answer on rate limit** | When a 429 error is caught mid-session, returning the agent's last `Thought:` as a best-effort result rather than crashing — preserves the work done so far. |
+| **Session-scoped array** | A variable declared outside a loop but inside a function — persists for the whole session, resets when the program restarts. |
+| **`array.length` property** | `length` is a read-only numeric property on arrays and strings. It is NOT a function — calling `arr.length()` throws `TypeError`. |
+| **Filename-safe timestamp** | ISO timestamps contain `:` which is illegal in Windows filenames. Strip with `.replace(/[-:T.]/g, '').slice(0, 14)` to get `YYYYMMDDHHMMSS`. |
+| **Empty `catch` anti-pattern** | A `catch {}` block with no body silently swallows errors. Always log at minimum: `catch (e) { console.log(e.message); }` |
